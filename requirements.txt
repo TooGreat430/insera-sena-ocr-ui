@@ -1,0 +1,5 @@
+streamlit
+google-cloud-storage
+google-generativeai
+PyPDF2
+reportlab

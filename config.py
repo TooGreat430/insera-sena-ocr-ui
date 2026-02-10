@@ -1,0 +1,7 @@
+PROJECT_ID = "import-document-automation"
+LOCATION = "asia-southeast2"
+BUCKET_NAME = "bkt-insera-sena-idp"
+TMP_PREFIX = "tmp"
+RESULT_PREFIX = "result"
+PO_PREFIX = "po"
+MODEL_NAME = "gemini-2.5-flash"
