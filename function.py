@@ -10,7 +10,6 @@ from total import TOTAL_SYSTEM_INSTRUCTION
 from container import CONTAINER_SYSTEM_INSTRUCTION
 
 storage_client = storage.Client()
-genai.configure(project=PROJECT_ID, location=LOCATION)
 
 
 def _download_single_po_json():
