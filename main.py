@@ -5,14 +5,8 @@ from google.cloud import storage
 from config import BUCKET_NAME, TMP_PREFIX
 import os
 
-# =========================
-# PAGE CONFIG
-# =========================
 st.set_page_config(layout="wide")
 
-# =========================
-# CUSTOM CSS (BESARIN SIDEBAR)
-# =========================
 st.markdown("""
 <style>
     section[data-testid="stSidebar"] * {
@@ -29,7 +23,7 @@ st.markdown("""
 col1, col2 = st.columns([1, 5])
 
 with col1:
-    st.image("logo-polygon-insera-sena.jpg", width=120)  # <-- taruh file logo.png di root project
+    st.image("logo-polygon-insera-sena.jpg", width=120) 
 
 with col2:
     st.markdown('<div class="main-title">OCR Gemini</div>', unsafe_allow_html=True)
@@ -89,24 +83,84 @@ if menu == "Report":
         ["detail", "total", "container"]
     )
 
-    prefix = f"result/{report_type}/"
+    result_prefix = f"result/{report_type}/"
+    tmp_prefix = "tmp/result/"
 
-    blobs = list(storage_client.list_blobs(BUCKET_NAME, prefix=prefix))
+    result_blobs = list(storage_client.list_blobs(BUCKET_NAME, prefix=result_prefix))
+    tmp_blobs = list(storage_client.list_blobs(BUCKET_NAME, prefix=tmp_prefix))
 
-    if not blobs:
+    files_data = []
+
+    for blob in result_blobs:
+        if blob.name.endswith("/"):
+            continue
+
+        files_data.append({
+            "invoice": os.path.basename(blob.name),
+            "status": "DONE",
+            "updated": blob.updated,
+            "path": blob.name
+        })
+
+    running_invoices = set()
+
+    for blob in tmp_blobs:
+        name = os.path.basename(blob.name)
+
+        if "__" in name and name.endswith(".json"):
+            invoice_name = name.split("_detail__")[0]
+            running_invoices.add(invoice_name)
+
+    for invoice in running_invoices:
+        # check if already marked done
+        already_done = any(invoice in f["invoice"] for f in files_data)
+
+        if not already_done:
+            files_data.append({
+                "invoice": invoice,
+                "status": "RUNNING",
+                "updated": None,
+                "path": None
+            })
+
+    if not files_data:
         st.warning("Belum ada file result.")
     else:
-        file_names = [os.path.basename(b.name) for b in blobs if not b.name.endswith("/")]
+        # Sort by updated time (DONE first newest)
+        files_data = sorted(
+            files_data,
+            key=lambda x: (x["status"], x["updated"] or 0),
+            reverse=True
+        )
 
-        selected_file = st.selectbox("Pilih file", file_names)
+        for f in files_data:
 
-        if selected_file:
-            blob = bucket.blob(f"{prefix}{selected_file}")
-            file_bytes = blob.download_as_bytes()
+            col1, col2, col3, col4 = st.columns([3, 2, 3, 2])
 
-            st.download_button(
-                label="Download File",
-                data=file_bytes,
-                file_name=selected_file,
-                mime="application/pdf"
-            )
+            with col1:
+                st.write(f["invoice"])
+
+            with col2:
+                if f["status"] == "DONE":
+                    st.success("DONE")
+                else:
+                    st.warning("RUNNING")
+
+            with col3:
+                if f["updated"]:
+                    st.write(f["updated"].strftime("%Y-%m-%d %H:%M:%S"))
+                else:
+                    st.write("-")
+
+            with col4:
+                if f["status"] == "DONE":
+                    blob = bucket.blob(f["path"])
+                    file_bytes = blob.download_as_bytes()
+
+                    st.download_button(
+                        label="Download",
+                        data=file_bytes,
+                        file_name=f["invoice"],
+                        mime="text/csv"
+                    )
+
