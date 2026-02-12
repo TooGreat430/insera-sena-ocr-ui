@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import os
+import csv
 from google.cloud import storage
 from PyPDF2 import PdfMerger
 from reportlab.lib.pagesizes import A4
@@ -11,10 +12,10 @@ import vertexai
 from vertexai.preview.generative_models import GenerativeModel, Part
 
 from config import *
-from detail import DETAIL_SYSTEM_INSTRUCTION
-from total import TOTAL_SYSTEM_INSTRUCTION
-from container import CONTAINER_SYSTEM_INSTRUCTION
+from detail import build_detail_prompt
+from row import ROW_SYSTEM_INSTRUCTION
 
+BATCH_SIZE = 5
 
 storage_client = storage.Client()
 
@@ -30,7 +31,7 @@ def _download_single_po_json():
     blobs = list(bucket.list_blobs(prefix=PO_PREFIX))
 
     if not blobs:
-        raise Exception("PO JSON tidak ditemukan di folder PO")
+        raise Exception("PO JSON tidak ditemukan")
 
     return blobs[0].download_as_text()
 
@@ -52,6 +53,7 @@ def _json_to_pdf(json_text):
     c.save()
     return tmp.name
 
+
 def _merge_pdfs(pdf_paths):
     merger = PdfMerger()
 
@@ -63,6 +65,7 @@ def _merge_pdfs(pdf_paths):
     merger.close()
 
     return out.name
+
 
 def _call_gemini(pdf_path, system_instruction):
 
@@ -84,43 +87,125 @@ def _call_gemini(pdf_path, system_instruction):
 
     return response.text
 
+
+def _parse_json_safe(text):
+    try:
+        return json.loads(text)
+    except:
+        # try cleaning
+        text = text.strip()
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1:
+            return json.loads(text[start:end+1])
+        raise Exception("Gemini output bukan JSON valid")
+
+
+def _get_total_row(merged_pdf):
+    raw = _call_gemini(merged_pdf, ROW_SYSTEM_INSTRUCTION)
+    data = json.loads(raw)
+    return int(data["total_row"])
+
+
+def _save_batch_tmp(invoice_name, batch_no, json_array):
+    bucket = storage_client.bucket(BUCKET_NAME)
+
+    path = f"tmp/result/{invoice_name}_detail__{batch_no}.json"
+
+    bucket.blob(path).upload_from_string(
+        json.dumps(json_array),
+        content_type="application/json"
+    )
+
+
+def _merge_all_batches(invoice_name):
+    bucket = storage_client.bucket(BUCKET_NAME)
+
+    prefix = f"tmp/result/{invoice_name}_detail__"
+    blobs = list(bucket.list_blobs(prefix=prefix))
+
+    all_rows = []
+
+    for b in blobs:
+        data = json.loads(b.download_as_text())
+        all_rows.extend(data)
+
+    # DROP COLUMN index
+    for row in all_rows:
+        if "index" in row:
+            del row["index"]
+
+    return all_rows, blobs
+
+
+def _convert_to_csv(data):
+    if not data:
+        return ""
+
+    output = io.StringIO()
+    fieldnames = list(data[0].keys())
+
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for row in data:
+        writer.writerow(row)
+
+    return output.getvalue()
+
 def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     bucket = storage_client.bucket(BUCKET_NAME)
 
+    # 1️⃣ PO JSON → PDF
     po_json = _download_single_po_json()
     po_pdf = _json_to_pdf(po_json)
 
+    # 2️⃣ Merge All PDF
     merged_pdf = _merge_pdfs(uploaded_pdf_paths + [po_pdf])
 
-    detail_csv = _call_gemini(
-        merged_pdf,
-        DETAIL_SYSTEM_INSTRUCTION
-    )
+    # 3️⃣ Hitung total_row (1x)
+    total_row = _get_total_row(merged_pdf)
 
+    # 4️⃣ AUTO LOOP BATCH
+    first_index = 1
+    batch_no = 1
+
+    while first_index <= total_row:
+
+        last_index = min(first_index + BATCH_SIZE - 1, total_row)
+
+        prompt = build_detail_prompt(
+            total_row=total_row,
+            first_index=first_index,
+            last_index=last_index
+        )
+
+        raw = _call_gemini(merged_pdf, prompt)
+        json_array = _parse_json_safe(raw)
+
+        _save_batch_tmp(invoice_name, batch_no, json_array)
+
+        first_index = last_index + 1
+        batch_no += 1
+
+        if last_index == total_row:
+            break
+
+    # 5️⃣ Merge Semua Batch
+    all_rows, blobs = _merge_all_batches(invoice_name)
+
+    final_csv = _convert_to_csv(all_rows)
+
+    # 6️⃣ Upload Final CSV
     bucket.blob(
         f"{RESULT_PREFIX}/detail/{invoice_name}_detail.csv"
-    ).upload_from_string(detail_csv)
+    ).upload_from_string(final_csv)
 
-    if with_total_container:
+    # 7️⃣ Cleanup tmp/result batch files
+    for b in blobs:
+        b.delete()
 
-        total_csv = _call_gemini(
-            merged_pdf,
-            TOTAL_SYSTEM_INSTRUCTION
-        )
-
-        container_csv = _call_gemini(
-            merged_pdf,
-            CONTAINER_SYSTEM_INSTRUCTION
-        )
-
-        bucket.blob(
-            f"{RESULT_PREFIX}/total/{invoice_name}_total.csv"
-        ).upload_from_string(total_csv)
-
-        bucket.blob(
-            f"{RESULT_PREFIX}/container/{invoice_name}_container.csv"
-        ).upload_from_string(container_csv)
-
+    # 8️⃣ Cleanup tmp upload files
     for blob in bucket.list_blobs(prefix=TMP_PREFIX):
         blob.delete()
