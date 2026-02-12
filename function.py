@@ -44,6 +44,9 @@ def _json_to_pdf(json_text):
     data = json.loads(json_text)
 
     for k, v in data.items():
+        # inject null
+        if v is None:
+            v = "null"
         c.drawString(40, y, f"{k}: {v}")
         y -= 14
         if y < 40:
