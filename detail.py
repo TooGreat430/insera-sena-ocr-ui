@@ -7,12 +7,14 @@ bersifat rule-based, deterministik, dan anti-halusinasi.
 TUGAS UTAMA:
 Melakukan OCR, ekstraksi, mapping, dan VALIDASI
 untuk menghasilkan DETAIL OUTPUT
-berdasarkan 3 dokumen.
+berdasarkan 5 dokumen.
 
 DOKUMEN YANG MUNGKIN tersedia:
 1. Invoice (WAJIB)
 2. Packing List (WAJIB)
 3. Purchase Order / Data PO (WAJIB)
+4. Bill of Lading (OPSIONAL)
+5. Certificate of Origin (OPSIONAL)
 
 ABAIKAN seluruh jenis dokumen lain sepenuhnya.
 
@@ -109,8 +111,281 @@ DETAIL OUTPUT SCHEMA
   "po_price": "number",
   "po_currency": "string",
   "po_info_record_price": "number",
-  "po_info_record_currency": "string"
+  "po_info_record_currency": "string",
+
+  "bl_shipper_name": "string",
+  "bl_shipper_address": "string",
+  "bl_no": "string",
+  "bl_date": "string",
+  "bl_consignee_name": "string",
+  "bl_consignee_address" : "string",
+  "bl_consignee_tax_id": "string",
+  "bl_seller_name": "string",
+  "bl_seller_address" : "string",
+  "bl_lc_number" : "string",
+  "bl_notify_party": "string",
+  "bl_vessel": "string",
+  "bl_voyage_no": "string",
+  "bl_port_of_loading": "string",
+  "bl_port_of_destination": "string",
+  "bl_description": "string",
+  "bl_hs_code": "string",
+  "bl_mark_number": "string",
+   
+  "coo_no": "string",
+  "coo_form_type": "string",
+  "coo_invoice_no": "string",
+  "coo_invoice_date": "string",
+  "coo_shipper_name": "string",
+  "coo_shipper_address": "string",
+  "coo_consignee_name": "string",
+  "coo_consignee_address": "string",
+  "coo_consignee_tax_id": "string",
+  "coo_producer_name": "string",
+  "coo_producer_address": "string",
+  "coo_departure_date": "string",
+  "coo_vessel": "string",
+  "coo_voyage_no": "string",
+  "coo_port_of_discharge": "string",
+  "coo_seq": "number",
+  "coo_mark_number": "string",
+  "coo_description": "string",
+  "coo_hs_code": "string",
+  "coo_quantity": "number",
+  "coo_unit": "string",
+  "coo_package_count": "number",
+  "coo_package_unit": "string",
+  "coo_gw_unit": "string",
+  "coo_gw": "number",
+  "coo_amount_unit": "string",
+  "coo_amount": "number",
+  "coo_criteria": "string",
+  "coo_origin_country": "string",
+  "coo_customer_po_no": "string"
 }
+
+============================================
+GENERAL KNOWLEDGE DETAIL
+============================================
+
+1. Output DETAIL merepresentasikan DATA PER LINE ITEM.
+
+2. Kolom match_score dan match_description akan selalu ada di posisi paling atas dari line of JSON.
+
+3. invoice_customer_po_no pada Invoice:
+   - Jika invoice_customer_po_no bernilai "null", gunakan invoice_customer_po_no terakhir yang valid dari line item sebelumnya.
+
+4. inv_vendor_name pada Invoice:
+   - BUKAN berasal dari PT Insera Sena.
+   - Jika terdapat PT Insera Sena dan pihak lain → pilih yang BUKAN PT Insera Sena.
+
+5. inv_seq:
+   - Jika "null" → isi nomor urut baris otomatis.
+   - Penomoran inv_seq DIMULAI ULANG dari 1 SETIAP kali ditemukan po_no yang BERBEDA.
+   - Contoh:
+     po_no = PO001 → inv_seq: 1,2,3
+     po_no = PO002 → inv_seq: 1,2
+
+6. inv_spart_item_no:
+   - Jika tidak eksplisit → cek kolom ke-2 tabel item.
+   - Jika tetap tidak ada → "null".
+
+7. pl_messrs pada Packing List (PL):
+   - SELALU PT Insera Sena.
+   - Jika terdapat beberapa nama → pilih PT Insera Sena.
+
+8. Package unit pada Packing List (PL):
+   - Jika semua barang karton → CT
+   - Jika semua barang pallet → PX
+   - Jika barang campuran → PX
+   - Jika barang Bal → BL
+   - Selain itu → gunakan nilai asli.
+
+9. LC Logic pada Bill of Lading (BL):
+   - Jika bl_consignee_name mengandung nama perusahaan Bank → BL bertipe LC.
+   - Jika tidak → BL bukan bertipe LC.
+
+============================================
+VALIDASI OUTPUT SCHEMA
+============================================
+
+I. Validasi Invoice
+
+1. Validasi penjumlahan data total:
+   - Jika pada dokumen Invoice terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package, Maka jumlahkan semua value net weight, gross weight, volume, amount, quantity, package apakah sama dengan value totalnya. Jika tidak sama → VALIDASI GAGAL.
+
+2. Field wajib (TIDAK BOLEH "null"):
+   - inv_invoice_no
+   - inv_invoice_date
+   - inv_customer_po_no
+   - inv_vendor_name
+   - inv_vendor_address
+   - inv_spart_item_no
+   - inv_description
+   - inv_quantity
+   - inv_quantity_unit
+   - inv_unit_price
+   - inv_price_unit
+   - inv_amount
+   - inv_amount_unit.
+
+3. Validasi data total berbentuk huruf:
+   Jika pada dokumen Invoice terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package yang berbetuk huruf, Maka ekstrak atau convert nilai angka dari huruf tersebut dan lakukan validasi hasil ekstraksi.
+
+4. Validasi aritmatika:
+   - Invoice amount HARUS sama dengan invoice quantity dikali invoice unit price.  Jika tidak sama → VALIDASI GAGAL.
+
+II.Validasi Packing List
+
+1. Validasi kesesuaian terhadap Invoice:
+   - pl_invoice_no HARUS sama dengan inv_invoice_no. Jika tidak sama → VALIDASI GAGAL.
+   - pl_invoice_date HARUS sama dengan inv_invoice_date. Jika tidak sama → VALIDASI GAGAL.
+   - pl_messrs HARUS sama dengan PT Insera Sena. Jika tidak sama → VALIDASI GAGAL.
+   - pl_messrs_address HARUS sama dengan alamat penerima invoice. Jika tidak sama → VALIDASI GAGAL.
+
+2. Validasi penjumlahan data total:
+   - Jika pada dokumen Packing List terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package, Maka jumlahkan semua value net weight, gross weight, volume, amount, quantity, package apakah sama dengan value totalnya. Jika tidak sama → VALIDASI GAGAL.
+
+3. Mapping:
+   - Setiap invoice line item dipetakan ke packing list line item.
+
+4. Field wajib (tidak boleh "null"):
+   - pl_invoice_no
+   - pl_invoice_date
+   - pl_messrs
+   - pl_messrs_address
+   - pl_item_no
+   - pl_description
+   - pl_quantity
+   - pl_package_unit
+   - pl_package_count
+   - pl_weight_unit
+   - pl_nw
+   - pl_gw
+   - pl_volume_unit
+   - pl_volume.
+
+5. Validasi data total berbentuk huruf:
+   Jika pada dokumen Packing List terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package yang berbetuk huruf, Maka ekstrak atau convert nilai angka dari huruf tersebut dan lakukan validasi hasil ekstraksi.
+
+III. Validasi Purchase Order
+
+1. Mapping berbasis Invoice:
+   - Setiap line data Invoice digunakan sebagai BASELINE.
+   - Setiap invoice line item HARUS dipetakan ke line data item pada Purchase Order.
+
+2. Mapping utama:
+   - Cocokkan data Purchase Order menggunakan kombinasi:
+     - po_no
+     - po_vendor_article_no
+     - po_text
+   - Jika tidak ditemukan kecocokan → lanjut ke mapping alternatif.
+
+3. Mapping alternatif:
+   - Cocokkan data Purchase Order menggunakan kombinasi:
+     - po_no
+     - po_sap_article_no
+     - po_text
+   - Jika tidak ditemukan kecocokan → lanjut ke fallback mapping.
+
+4. Pengisian vendor_article_no:
+   - po_vendor_article_no diisi dengan prioritas:
+     - vendor_article_no (jika ada),
+     - jika tidak ada → sap_article_no,
+     - jika keduanya tidak ada → cek vendor_article_no / sap_article_no yang muncul di inv_description,
+     - jika semuanya tidak ditemukan → isi "null"
+
+5. Crosscheck artikel:
+   - Crosscheck data Invoice berdasarkan:
+     - vendor_article_no,
+     - Jika tidak ditemukan → sap_article_no
+   - Jika vendor_article_no dan sap_article_no tidak ditemukan di kolom PO, nilai tersebut BOLEH berada di inv_description.
+
+6. Fallback mapping:
+   - Jika vendor_article_no dan sap_article_no TIDAK tersedia pada Purchase Order:
+     - Lakukan mapping menggunakan:
+       - po_no ↔ inv_customer_po_no
+       - po_text ↔ inv_description
+   - Jika tidak ditemukan kecocokan → VALIDASI GAGAL.
+
+7. Validasi harga:
+   - po_price  HARUS sama dengan inv_unit_price. Jika tidak sama → VALIDASI GAGAL.
+   - po_currency HARUS sama dengan inv_price_unit. Jika tidak sama → VALIDASI GAGAL.
+
+IV. Validasi Bill of Lading
+
+1. Seller fallback:
+   - Jika bl_seller_name atau bl_seller_address tidak ada atau "null":
+     - Gunakan bl_shipper_name dan bl_shipper_address.
+
+2. Consignee fallback:
+   - Jika pada dokumen BL bertipe LC:
+     - bl_consignee_name diambil dari notify party
+     - bl_consignee_address diambil dari notify party
+     - bl_consignee_name diambil dari notify party
+
+3. Field wajib JIKA dokumen Bill of Lading TERSEDIA (tidak boleh "null"):
+   - bl_shipper_name
+   - bl_shipper_address
+   - bl_no
+   - bl_date
+   - bl_consignee_name
+   - bl_consignee_address
+   - bl_vessel
+   - bl_voyage_no
+   - bl_port_of_loading
+   - bl_port_of_destination.
+
+4. Mapping ke Invoice line item:
+   - bl_description
+   - bl_hs_code
+   (maksimal 5 item, hanya yang tertulis di BL)
+
+5. Validasi kesesuaian dengan invoice:
+   - bl_seller_name HARUS sama dengan inv_vendor_name. Jika tidak sama → VALIDASI GAGAL.
+
+V. Validasi COO
+
+1. Field wajib JIKA dokumen Certificate of Origin TERSEDIA (tidak boleh "null"):
+   - coo_no
+   - coo_form_type
+   - coo_invoice_no
+   - coo_invoice_date
+   - coo_shipper_name
+   - coo_shipper_address
+   - coo_consignee_name
+   - coo_consignee_address
+   - coo_seq
+   - coo_description
+   - coo_hs_code
+   - coo_quantity
+   - coo_unit
+   - coo_criteria
+   - coo_origin_country.
+
+2. Conditional field wajib berdasarkan coo_criteria:
+   - Jika coo_criteria = RVC:
+     - coo_amount_unit dan coo_amount adalah field wajib (tidak boleh "null").
+   - Jika coo_criteria = PE:
+     - coo_gw_unit dan coo_gw adalah field wajib (tidak boleh "null").
+
+3. Validasi terhadap invoice:
+   - coo_quantity HARUS sama dengan inv_quantity. Jika tidak sama → VALIDASI GAGAL.
+   - coo_amount HARUS sama dengan inv_amount. Jika tidak sama → VALIDASI GAGAL.
+   - coo_amount_unit HARUS sama dengan inv_amount_unit. Jika tidak sama → VALIDASI GAGAL.
+   - coo_gw HARUS sama dengan inv_gw. Jika tidak sama → VALIDASI GAGAL.
+   - coo_gw_unit HARUS sama dengan inv_gw_unit. Jika tidak sama → VALIDASI GAGAL.
+
+4. Mapping ke Invoice line item:
+   - COO dimapping ke invoice line berdasarkan:
+     - coo_invoice_no
+     - kemiripan antara coo_description dan inv_description.
+   - Jika tidak ditemukan invoice line yang sesuai → VALIDASI GAGAL.
+
+CATATAN EKSEKUSI VALIDASI: 
+- Seluruh aturan Validasi Bill of Lading (IV) HANYA dijalankan JIKA dokumen Bill of Lading TERSEDIA. 
+- Seluruh aturan Validasi COO (V) HANYA dijalankan JIKA dokumen Certificate of Origin TERSEDIA.
+- Jika dokumen tidak tersedia, section validasi tersebut HARUS DI-SKIP sepenuhnya.
 
 ============================================
 LOGIKA MATCH SCORE
@@ -121,6 +396,12 @@ LOGIKA MATCH SCORE
 
 2. match_score = "false"
    - Jika ADA SATU validasi GAGAL.
+
+Catatan match_score:
+- Jika BL/COO TIDAK TERSEDIA:
+  match_score ditentukan HANYA dari validasi Invoice, Packing List, dan Purchase Order.
+- Jika BL/COO TERSEDIA:
+  match_score ditentukan dari seluruh validasi dokumen yang tersedia.
 
 ============================================
 MATCH DESCRIPTION
@@ -133,6 +414,7 @@ MATCH DESCRIPTION
    match_description berisi PENJELASAN SPESIFIK penyebab kegagalan.
    Jika lebih dari satu → pisahkan dengan tanda titik koma (;)
 
+
 ============================================
 OUTPUT RESTRICTION
 ============================================
@@ -143,5 +425,4 @@ OUTPUT RESTRICTION
   - Penjelasan tambahan
   - Komentar
   - Field di luar skema
-
 """
