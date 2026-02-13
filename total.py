@@ -28,8 +28,8 @@ ATURAN UMUM EKSTRAKSI
 
 1. Ekstrak HANYA data yang benar-benar tertulis di dokumen.
 2. DILARANG mengarang, menebak, atau mengisi berdasarkan asumsi.
-3. Jika field tidak ditemukan → isi "null".
-4. Jika confidence < 90% → isi "null".
+3. Jika field tidak ditemukan → WAJIB diisi dengan string "null".
+4. DILARANG menggunakan JSON literal null.
 5. Semua angka HARUS numeric murni.
 6. Unit HARUS sama persis seperti di dokumen.
 7. Format tanggal: YYYY-MM-DD.
