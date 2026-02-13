@@ -1,5 +1,5 @@
 PROJECT_ID = "import-document-automation"
-LOCATION = "asia-southeast2"
+LOCATION = "asia-southeast1"
 BUCKET_NAME = "bkt-insera-sena-idp"
 TMP_PREFIX = "tmp"
 RESULT_PREFIX = "result"

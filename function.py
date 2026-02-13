@@ -109,10 +109,19 @@ def _merge_pdfs(pdf_paths):
 # GEMINI CALL (GEN AI SDK)
 # ==============================
 
-def _call_gemini(pdf_path, prompt):
+def _upload_temp_pdf_to_gcs(local_path, invoice_name):
+    bucket = storage_client.bucket(BUCKET_NAME)
 
-    with open(pdf_path, "rb") as f:
-        file_bytes = f.read()
+    blob_path = f"tmp/gemini_input/{invoice_name}_merged.pdf"
+    blob = bucket.blob(blob_path)
+
+    blob.upload_from_filename(local_path)
+
+    return f"gs://{BUCKET_NAME}/{blob_path}"
+
+def _call_gemini(pdf_path, prompt, invoice_name):
+
+    file_uri = _upload_temp_pdf_to_gcs(pdf_path, invoice_name)
 
     try:
         response = genai_client.models.generate_content(
@@ -121,8 +130,8 @@ def _call_gemini(pdf_path, prompt):
                 types.Content(
                     role="user",
                     parts=[
-                        types.Part.from_bytes(
-                            data=file_bytes,
+                        types.Part.from_uri(
+                            file_uri=file_uri,
                             mime_type="application/pdf",
                         ),
                         types.Part.from_text(
@@ -134,36 +143,16 @@ def _call_gemini(pdf_path, prompt):
             config=types.GenerateContentConfig(
                 temperature=0.1,
                 top_p=1,
-                max_output_tokens=16384,  # 🔥 turunkan biar stabil
-                safety_settings=[
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_HATE_SPEECH",
-                        threshold="OFF",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                        threshold="OFF",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        threshold="OFF",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_HARASSMENT",
-                        threshold="OFF",
-                    ),
-                ],
+                max_output_tokens=16384,
             ),
         )
 
-        # 🔥 Defensive handling
         if not response:
             raise Exception("Empty response from Gemini")
 
         if hasattr(response, "text") and response.text:
             return response.text
 
-        # fallback manual extract
         if response.candidates:
             parts = response.candidates[0].content.parts
             text_output = ""
@@ -177,6 +166,7 @@ def _call_gemini(pdf_path, prompt):
 
     except Exception as e:
         raise Exception(f"Gemini call failed: {str(e)}")
+
 
 
 
@@ -200,8 +190,8 @@ def _parse_json_safe(text):
 # GET TOTAL ROW (1x)
 # ==============================
 
-def _get_total_row(merged_pdf):
-    raw = _call_gemini(merged_pdf, ROW_SYSTEM_INSTRUCTION)
+def _get_total_row(merged_pdf, invoice_name):
+    raw = _call_gemini(merged_pdf, ROW_SYSTEM_INSTRUCTION, invoice_name)
     data = json.loads(raw)
     return int(data["total_row"])
 
@@ -280,7 +270,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
     merged_pdf = _merge_pdfs(uploaded_pdf_paths + [po_pdf])
 
     # 3️⃣ Get total_row (1x)
-    total_row = _get_total_row(merged_pdf)
+    total_row = _get_total_row(merged_pdf, invoice_name)
 
     first_index = 1
     batch_no = 1
