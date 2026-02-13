@@ -53,18 +53,39 @@ def _json_to_pdf(json_text):
     y = 800
     data = json.loads(json_text)
 
-    for k, v in data.items():
-        # inject null
-        if v is None:
-            v = "null"
-        c.drawString(40, y, f"{k}: {v}")
+    def draw_line(text):
+        nonlocal y
+        c.drawString(40, y, text)
         y -= 14
         if y < 40:
             c.showPage()
             y = 800
 
+    # 🔥 HANDLE DICT
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if v is None:
+                v = "null"
+            draw_line(f"{k}: {v}")
+
+    # 🔥 HANDLE LIST OF DICT
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            draw_line(f"--- ROW {i+1} ---")
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    if v is None:
+                        v = "null"
+                    draw_line(f"{k}: {v}")
+            else:
+                draw_line(str(item))
+
+    else:
+        draw_line(str(data))
+
     c.save()
     return tmp.name
+
 
 
 def _merge_pdfs(pdf_paths):
