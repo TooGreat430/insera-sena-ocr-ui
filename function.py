@@ -8,10 +8,12 @@ from PyPDF2 import PdfMerger
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-import vertexai
-from vertexai.preview.generative_models import GenerativeModel, Part
+from google import genai
+from google.genai import types
 
 from config import *
+from total import TOTAL_SYSTEM_INSTRUCTION
+from container import CONTAINER_SYSTEM_INSTRUCTION
 from detail import build_detail_prompt
 from row import ROW_SYSTEM_INSTRUCTION
 
@@ -19,16 +21,19 @@ BATCH_SIZE = 5
 
 storage_client = storage.Client()
 
-vertexai.init(
+genai_client = genai.Client(
+    vertexai=True,
     project=PROJECT_ID,
-    location=LOCATION
+    location=LOCATION,
 )
 
-model = GenerativeModel(MODEL_NAME)
+
+# ==============================
+# DOWNLOAD PO JSON
+# ==============================
 
 def _download_single_po_json():
     bucket = storage_client.bucket(BUCKET_NAME)
-
     blobs = list(bucket.list_blobs(prefix=f"{PO_PREFIX}/"))
 
     json_files = [
@@ -45,6 +50,9 @@ def _download_single_po_json():
     return json_files[0].download_as_text()
 
 
+# ==============================
+# JSON → PDF
+# ==============================
 
 def _json_to_pdf(json_text):
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
@@ -61,25 +69,18 @@ def _json_to_pdf(json_text):
             c.showPage()
             y = 800
 
-    # 🔥 HANDLE DICT
     if isinstance(data, dict):
         for k, v in data.items():
-            if v is None:
-                v = "null"
-            draw_line(f"{k}: {v}")
+            draw_line(f"{k}: {v if v is not None else 'null'}")
 
-    # 🔥 HANDLE LIST OF DICT
     elif isinstance(data, list):
         for i, item in enumerate(data):
             draw_line(f"--- ROW {i+1} ---")
             if isinstance(item, dict):
                 for k, v in item.items():
-                    if v is None:
-                        v = "null"
-                    draw_line(f"{k}: {v}")
+                    draw_line(f"{k}: {v if v is not None else 'null'}")
             else:
                 draw_line(str(item))
-
     else:
         draw_line(str(data))
 
@@ -87,6 +88,9 @@ def _json_to_pdf(json_text):
     return tmp.name
 
 
+# ==============================
+# MERGE PDF
+# ==============================
 
 def _merge_pdfs(pdf_paths):
     merger = PdfMerger()
@@ -101,32 +105,65 @@ def _merge_pdfs(pdf_paths):
     return out.name
 
 
-def _call_gemini(pdf_path, system_instruction):
+# ==============================
+# GEMINI CALL (GEN AI SDK)
+# ==============================
+
+def _call_gemini(pdf_path, prompt):
 
     with open(pdf_path, "rb") as f:
         file_bytes = f.read()
 
-    response = model.generate_content(
+    response = genai_client.models.generate_content(
+        model="gemini-2.5-flash",
         contents=[
-            Part.from_data(
-                mime_type="application/pdf",
-                data=file_bytes
-            ),
-            Part.from_text(system_instruction)
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_bytes(
+                        data=file_bytes,
+                        mime_type="application/pdf",
+                    ),
+                    types.Part.from_text(prompt),
+                ],
+            )
         ],
-        generation_config={
-            "temperature": 0.1
-        }
+        config=types.GenerateContentConfig(
+            temperature=0.1,
+            top_p=1,
+            max_output_tokens=32768,
+            safety_settings=[
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH",
+                    threshold="OFF",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold="OFF",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold="OFF",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT",
+                    threshold="OFF",
+                ),
+            ],
+        ),
     )
 
     return response.text
 
 
+# ==============================
+# JSON SAFE PARSER
+# ==============================
+
 def _parse_json_safe(text):
     try:
         return json.loads(text)
     except:
-        # try cleaning
         text = text.strip()
         start = text.find("[")
         end = text.rfind("]")
@@ -135,11 +172,19 @@ def _parse_json_safe(text):
         raise Exception("Gemini output bukan JSON valid")
 
 
+# ==============================
+# GET TOTAL ROW (1x)
+# ==============================
+
 def _get_total_row(merged_pdf):
     raw = _call_gemini(merged_pdf, ROW_SYSTEM_INSTRUCTION)
     data = json.loads(raw)
     return int(data["total_row"])
 
+
+# ==============================
+# SAVE BATCH TEMP
+# ==============================
 
 def _save_batch_tmp(invoice_name, batch_no, json_array):
     bucket = storage_client.bucket(BUCKET_NAME)
@@ -151,6 +196,10 @@ def _save_batch_tmp(invoice_name, batch_no, json_array):
         content_type="application/json"
     )
 
+
+# ==============================
+# MERGE ALL BATCHES
+# ==============================
 
 def _merge_all_batches(invoice_name):
     bucket = storage_client.bucket(BUCKET_NAME)
@@ -164,13 +213,16 @@ def _merge_all_batches(invoice_name):
         data = json.loads(b.download_as_text())
         all_rows.extend(data)
 
-    # DROP COLUMN index
+    # DROP INDEX COLUMN
     for row in all_rows:
-        if "index" in row:
-            del row["index"]
+        row.pop("index", None)
 
     return all_rows, blobs
 
+
+# ==============================
+# CONVERT TO CSV
+# ==============================
 
 def _convert_to_csv(data):
     if not data:
@@ -187,6 +239,11 @@ def _convert_to_csv(data):
 
     return output.getvalue()
 
+
+# ==============================
+# MAIN RUN OCR
+# ==============================
+
 def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     bucket = storage_client.bucket(BUCKET_NAME)
@@ -195,13 +252,12 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
     po_json = _download_single_po_json()
     po_pdf = _json_to_pdf(po_json)
 
-    # 2️⃣ Merge All PDF
+    # 2️⃣ Merge PDF
     merged_pdf = _merge_pdfs(uploaded_pdf_paths + [po_pdf])
 
-    # 3️⃣ Hitung total_row (1x)
+    # 3️⃣ Get total_row (1x)
     total_row = _get_total_row(merged_pdf)
 
-    # 4️⃣ AUTO LOOP BATCH
     first_index = 1
     batch_no = 1
 
@@ -223,23 +279,46 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         first_index = last_index + 1
         batch_no += 1
 
-        if last_index == total_row:
-            break
-
-    # 5️⃣ Merge Semua Batch
+    # 4️⃣ Merge Semua Batch
     all_rows, blobs = _merge_all_batches(invoice_name)
-
     final_csv = _convert_to_csv(all_rows)
 
-    # 6️⃣ Upload Final CSV
     bucket.blob(
         f"{RESULT_PREFIX}/detail/{invoice_name}_detail.csv"
-    ).upload_from_string(final_csv)
+    ).upload_from_string(final_csv, content_type="text/csv")
 
-    # 7️⃣ Cleanup tmp/result batch files
+    # 5️⃣ Cleanup tmp/result/
     for b in blobs:
         b.delete()
 
-    # 8️⃣ Cleanup tmp upload files
+    # ================= TOTAL & CONTAINER =================
+
+    if with_total_container:
+
+        raw_total = _call_gemini(merged_pdf, TOTAL_SYSTEM_INSTRUCTION)
+        total_json = _parse_json_safe(raw_total)
+
+        bucket.blob(
+            f"{RESULT_PREFIX}/total/{invoice_name}_total.json"
+        ).upload_from_string(
+            json.dumps(total_json),
+            content_type="application/json"
+        )
+
+        raw_container = _call_gemini(
+            merged_pdf,
+            CONTAINER_SYSTEM_INSTRUCTION
+        )
+
+        container_json = _parse_json_safe(raw_container)
+
+        bucket.blob(
+            f"{RESULT_PREFIX}/container/{invoice_name}_container.json"
+        ).upload_from_string(
+            json.dumps(container_json),
+            content_type="application/json"
+        )
+
+    # Cleanup tmp upload files
     for blob in bucket.list_blobs(prefix=TMP_PREFIX):
         blob.delete()

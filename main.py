@@ -161,6 +161,6 @@ if menu == "Report":
                         label="Download",
                         data=file_bytes,
                         file_name=f["invoice"],
-                        mime="text/csv"
+                        mime="application/octet-stream"
                     )
 
