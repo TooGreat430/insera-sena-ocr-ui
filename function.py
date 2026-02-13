@@ -16,6 +16,7 @@ from total import TOTAL_SYSTEM_INSTRUCTION
 from container import CONTAINER_SYSTEM_INSTRUCTION
 from detail import build_detail_prompt
 from row import ROW_SYSTEM_INSTRUCTION
+import subprocess
 
 BATCH_SIZE = 5
 
@@ -103,6 +104,63 @@ def _merge_pdfs(pdf_paths):
     merger.close()
 
     return out.name
+
+# ==============================
+# COMPRESS PDF (NO SPLIT)
+# ==============================
+
+def _compress_pdf_if_needed(input_path, max_mb=45):
+    """
+    Compress PDF aggressively using Ghostscript
+    until file size is below max_mb.
+    """
+
+    size_mb = os.path.getsize(input_path) / (1024 * 1024)
+
+    if size_mb <= max_mb:
+        return input_path  # no need compress
+
+    compressed_path = input_path.replace(".pdf", "_compressed.pdf")
+
+    # First try: ebook mode (balanced)
+    cmd = [
+        "gs",
+        "-sDEVICE=pdfwrite",
+        "-dCompatibilityLevel=1.4",
+        "-dPDFSETTINGS=/ebook",
+        "-dNOPAUSE",
+        "-dQUIET",
+        "-dBATCH",
+        f"-sOutputFile={compressed_path}",
+        input_path,
+    ]
+
+    subprocess.run(cmd, check=True)
+
+    new_size = os.path.getsize(compressed_path) / (1024 * 1024)
+
+    # If still too big → aggressive mode
+    if new_size > max_mb:
+        compressed_path2 = input_path.replace(".pdf", "_compressed2.pdf")
+
+        cmd2 = [
+            "gs",
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dPDFSETTINGS=/screen",
+            "-dNOPAUSE",
+            "-dQUIET",
+            "-dBATCH",
+            f"-sOutputFile={compressed_path2}",
+            input_path,
+        ]
+
+        subprocess.run(cmd2, check=True)
+
+        return compressed_path2
+
+    return compressed_path
+
 
 
 # ==============================
@@ -269,6 +327,9 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
     # 2️⃣ Merge PDF
     merged_pdf = _merge_pdfs(uploaded_pdf_paths + [po_pdf])
 
+    # 🔥 COMPRESS BEFORE GEMINI
+    merged_pdf = _compress_pdf_if_needed(merged_pdf)
+
     # 3️⃣ Get total_row (1x)
     total_row = _get_total_row(merged_pdf, invoice_name)
 
@@ -285,7 +346,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
             last_index=last_index
         )
 
-        raw = _call_gemini(merged_pdf, prompt)
+        raw = _call_gemini(merged_pdf, prompt, invoice_name)
         json_array = _parse_json_safe(raw)
 
         _save_batch_tmp(invoice_name, batch_no, json_array)
@@ -309,7 +370,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     if with_total_container:
 
-        raw_total = _call_gemini(merged_pdf, TOTAL_SYSTEM_INSTRUCTION)
+        raw_total = _call_gemini(merged_pdf, TOTAL_SYSTEM_INSTRUCTION, invoice_name)
         total_json = _parse_json_safe(raw_total)
 
         bucket.blob(
@@ -319,10 +380,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
             content_type="application/json"
         )
 
-        raw_container = _call_gemini(
-            merged_pdf,
-            CONTAINER_SYSTEM_INSTRUCTION
-        )
+        raw_container = _call_gemini(merged_pdf, CONTAINER_SYSTEM_INSTRUCTION, invoice_name)
 
         container_json = _parse_json_safe(raw_container)
 
