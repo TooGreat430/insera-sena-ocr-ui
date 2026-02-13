@@ -28,12 +28,22 @@ model = GenerativeModel(MODEL_NAME)
 
 def _download_single_po_json():
     bucket = storage_client.bucket(BUCKET_NAME)
-    blobs = list(bucket.list_blobs(prefix=PO_PREFIX))
 
-    if not blobs:
-        raise Exception("PO JSON tidak ditemukan")
+    blobs = list(bucket.list_blobs(prefix=f"{PO_PREFIX}/"))
 
-    return blobs[0].download_as_text()
+    json_files = [
+        b for b in blobs
+        if b.name.endswith(".json") and not b.name.endswith("/")
+    ]
+
+    if not json_files:
+        raise Exception("PO JSON tidak ditemukan di folder po/")
+
+    if len(json_files) > 1:
+        raise Exception("Lebih dari 1 PO JSON ditemukan. Harus hanya 1 file.")
+
+    return json_files[0].download_as_text()
+
 
 
 def _json_to_pdf(json_text):
