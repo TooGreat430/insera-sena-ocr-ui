@@ -114,46 +114,70 @@ def _call_gemini(pdf_path, prompt):
     with open(pdf_path, "rb") as f:
         file_bytes = f.read()
 
-    response = genai_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_bytes(
-                        data=file_bytes,
-                        mime_type="application/pdf",
-                    ),
-                    types.Part.from_text(prompt),
-                ],
-            )
-        ],
-        config=types.GenerateContentConfig(
-            temperature=0.1,
-            top_p=1,
-            max_output_tokens=32768,
-            safety_settings=[
-                types.SafetySetting(
-                    category="HARM_CATEGORY_HATE_SPEECH",
-                    threshold="OFF",
-                ),
-                types.SafetySetting(
-                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                    threshold="OFF",
-                ),
-                types.SafetySetting(
-                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    threshold="OFF",
-                ),
-                types.SafetySetting(
-                    category="HARM_CATEGORY_HARASSMENT",
-                    threshold="OFF",
-                ),
+    try:
+        response = genai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_bytes(
+                            data=file_bytes,
+                            mime_type="application/pdf",
+                        ),
+                        types.Part.from_text(
+                            text=prompt
+                        ),
+                    ],
+                )
             ],
-        ),
-    )
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                top_p=1,
+                max_output_tokens=16384,  # 🔥 turunkan biar stabil
+                safety_settings=[
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_HATE_SPEECH",
+                        threshold="OFF",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                        threshold="OFF",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        threshold="OFF",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_HARASSMENT",
+                        threshold="OFF",
+                    ),
+                ],
+            ),
+        )
 
-    return response.text
+        # 🔥 Defensive handling
+        if not response:
+            raise Exception("Empty response from Gemini")
+
+        if hasattr(response, "text") and response.text:
+            return response.text
+
+        # fallback manual extract
+        if response.candidates:
+            parts = response.candidates[0].content.parts
+            text_output = ""
+            for p in parts:
+                if hasattr(p, "text") and p.text:
+                    text_output += p.text
+            if text_output:
+                return text_output
+
+        raise Exception("Gemini response tidak mengandung text")
+
+    except Exception as e:
+        raise Exception(f"Gemini call failed: {str(e)}")
+
 
 
 # ==============================
