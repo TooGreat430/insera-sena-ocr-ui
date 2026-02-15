@@ -3,10 +3,10 @@ import json
 import tempfile
 import os
 import csv
+import subprocess
+
 from google.cloud import storage
 from PyPDF2 import PdfMerger
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 
 from google import genai
 from google.genai import types
@@ -16,7 +16,7 @@ from total import TOTAL_SYSTEM_INSTRUCTION
 from container import CONTAINER_SYSTEM_INSTRUCTION
 from detail import build_detail_prompt
 from row import ROW_SYSTEM_INSTRUCTION
-import subprocess
+
 
 BATCH_SIZE = 5
 
@@ -52,45 +52,7 @@ def _download_single_po_json():
 
 
 # ==============================
-# JSON → PDF
-# ==============================
-
-def _json_to_pdf(json_text):
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    c = canvas.Canvas(tmp.name, pagesize=A4)
-
-    y = 800
-    data = json.loads(json_text)
-
-    def draw_line(text):
-        nonlocal y
-        c.drawString(40, y, text)
-        y -= 14
-        if y < 40:
-            c.showPage()
-            y = 800
-
-    if isinstance(data, dict):
-        for k, v in data.items():
-            draw_line(f"{k}: {v if v is not None else 'null'}")
-
-    elif isinstance(data, list):
-        for i, item in enumerate(data):
-            draw_line(f"--- ROW {i+1} ---")
-            if isinstance(item, dict):
-                for k, v in item.items():
-                    draw_line(f"{k}: {v if v is not None else 'null'}")
-            else:
-                draw_line(str(item))
-    else:
-        draw_line(str(data))
-
-    c.save()
-    return tmp.name
-
-
-# ==============================
-# MERGE PDF
+# MERGE PDF (INVOICE ONLY)
 # ==============================
 
 def _merge_pdfs(pdf_paths):
@@ -105,24 +67,19 @@ def _merge_pdfs(pdf_paths):
 
     return out.name
 
+
 # ==============================
 # COMPRESS PDF (NO SPLIT)
 # ==============================
 
 def _compress_pdf_if_needed(input_path, max_mb=45):
-    """
-    Compress PDF aggressively using Ghostscript
-    until file size is below max_mb.
-    """
-
     size_mb = os.path.getsize(input_path) / (1024 * 1024)
 
     if size_mb <= max_mb:
-        return input_path  # no need compress
+        return input_path
 
     compressed_path = input_path.replace(".pdf", "_compressed.pdf")
 
-    # First try: ebook mode (balanced)
     cmd = [
         "gs",
         "-sDEVICE=pdfwrite",
@@ -139,7 +96,6 @@ def _compress_pdf_if_needed(input_path, max_mb=45):
 
     new_size = os.path.getsize(compressed_path) / (1024 * 1024)
 
-    # If still too big → aggressive mode
     if new_size > max_mb:
         compressed_path2 = input_path.replace(".pdf", "_compressed2.pdf")
 
@@ -162,9 +118,8 @@ def _compress_pdf_if_needed(input_path, max_mb=45):
     return compressed_path
 
 
-
 # ==============================
-# GEMINI CALL (GEN AI SDK)
+# GEMINI CALL (PDF + JSON TEXT)
 # ==============================
 
 def _upload_temp_pdf_to_gcs(local_path, invoice_name):
@@ -172,14 +127,32 @@ def _upload_temp_pdf_to_gcs(local_path, invoice_name):
 
     blob_path = f"tmp/gemini_input/{invoice_name}_merged.pdf"
     blob = bucket.blob(blob_path)
-
     blob.upload_from_filename(local_path)
 
     return f"gs://{BUCKET_NAME}/{blob_path}"
 
-def _call_gemini(pdf_path, prompt, invoice_name):
+
+def _call_gemini(pdf_path, prompt, invoice_name, po_json_text=None):
 
     file_uri = _upload_temp_pdf_to_gcs(pdf_path, invoice_name)
+
+    parts = [
+        types.Part.from_uri(
+            file_uri=file_uri,
+            mime_type="application/pdf",
+        )
+    ]
+
+    if po_json_text:
+        parts.append(
+            types.Part.from_text(
+                text="PURCHASE ORDER DATA (JSON):\n" + po_json_text
+            )
+        )
+
+    parts.append(
+        types.Part.from_text(text=prompt)
+    )
 
     try:
         response = genai_client.models.generate_content(
@@ -187,15 +160,7 @@ def _call_gemini(pdf_path, prompt, invoice_name):
             contents=[
                 types.Content(
                     role="user",
-                    parts=[
-                        types.Part.from_uri(
-                            file_uri=file_uri,
-                            mime_type="application/pdf",
-                        ),
-                        types.Part.from_text(
-                            text=prompt
-                        ),
-                    ],
+                    parts=parts,
                 )
             ],
             config=types.GenerateContentConfig(
@@ -226,8 +191,6 @@ def _call_gemini(pdf_path, prompt, invoice_name):
         raise Exception(f"Gemini call failed: {str(e)}")
 
 
-
-
 # ==============================
 # JSON SAFE PARSER
 # ==============================
@@ -245,11 +208,11 @@ def _parse_json_safe(text):
 
 
 # ==============================
-# GET TOTAL ROW (1x)
+# GET TOTAL ROW
 # ==============================
 
-def _get_total_row(merged_pdf, invoice_name):
-    raw = _call_gemini(merged_pdf, ROW_SYSTEM_INSTRUCTION, invoice_name)
+def _get_total_row(pdf_path, invoice_name):
+    raw = _call_gemini(pdf_path, ROW_SYSTEM_INSTRUCTION, invoice_name)
     data = json.loads(raw)
     return int(data["total_row"])
 
@@ -285,7 +248,6 @@ def _merge_all_batches(invoice_name):
         data = json.loads(b.download_as_text())
         all_rows.extend(data)
 
-    # DROP INDEX COLUMN
     for row in all_rows:
         row.pop("index", None)
 
@@ -320,17 +282,16 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     bucket = storage_client.bucket(BUCKET_NAME)
 
-    # 1️⃣ PO JSON → PDF
+    # 1️⃣ Download PO JSON (tetap JSON)
     po_json = _download_single_po_json()
-    po_pdf = _json_to_pdf(po_json)
 
-    # 2️⃣ Merge PDF
-    merged_pdf = _merge_pdfs(uploaded_pdf_paths + [po_pdf])
+    # 2️⃣ Merge invoice PDF saja
+    merged_pdf = _merge_pdfs(uploaded_pdf_paths)
 
-    # 🔥 COMPRESS BEFORE GEMINI
+    # 3️⃣ Compress jika perlu
     merged_pdf = _compress_pdf_if_needed(merged_pdf)
 
-    # 3️⃣ Get total_row (1x)
+    # 4️⃣ Get total row
     total_row = _get_total_row(merged_pdf, invoice_name)
 
     first_index = 1
@@ -346,7 +307,13 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
             last_index=last_index
         )
 
-        raw = _call_gemini(merged_pdf, prompt, invoice_name)
+        raw = _call_gemini(
+            merged_pdf,
+            prompt,
+            invoice_name,
+            po_json_text=po_json
+        )
+
         json_array = _parse_json_safe(raw)
 
         _save_batch_tmp(invoice_name, batch_no, json_array)
@@ -354,7 +321,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         first_index = last_index + 1
         batch_no += 1
 
-    # 4️⃣ Merge Semua Batch
+    # 5️⃣ Merge batches
     all_rows, blobs = _merge_all_batches(invoice_name)
     final_csv = _convert_to_csv(all_rows)
 
@@ -362,7 +329,6 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         f"{RESULT_PREFIX}/detail/{invoice_name}_detail.csv"
     ).upload_from_string(final_csv, content_type="text/csv")
 
-    # 5️⃣ Cleanup tmp/result/
     for b in blobs:
         b.delete()
 
@@ -370,7 +336,13 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     if with_total_container:
 
-        raw_total = _call_gemini(merged_pdf, TOTAL_SYSTEM_INSTRUCTION, invoice_name)
+        raw_total = _call_gemini(
+            merged_pdf,
+            TOTAL_SYSTEM_INSTRUCTION,
+            invoice_name,
+            po_json_text=po_json
+        )
+
         total_json = _parse_json_safe(raw_total)
 
         bucket.blob(
@@ -380,7 +352,12 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
             content_type="application/json"
         )
 
-        raw_container = _call_gemini(merged_pdf, CONTAINER_SYSTEM_INSTRUCTION, invoice_name)
+        raw_container = _call_gemini(
+            merged_pdf,
+            CONTAINER_SYSTEM_INSTRUCTION,
+            invoice_name,
+            po_json_text=po_json
+        )
 
         container_json = _parse_json_safe(raw_container)
 
@@ -391,6 +368,6 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
             content_type="application/json"
         )
 
-    # Cleanup tmp upload files
+    # Cleanup tmp files
     for blob in bucket.list_blobs(prefix=TMP_PREFIX):
         blob.delete()
