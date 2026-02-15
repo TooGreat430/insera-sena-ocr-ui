@@ -30,6 +30,68 @@ genai_client = genai.Client(
 )
 
 # ==============================
+# JSON SAFE PARSER
+# ==============================
+
+def _parse_json_safe(raw_text):
+
+    if not raw_text:
+        raise Exception("Gemini returned empty response")
+
+    raw_text = raw_text.strip()
+
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```json", "", raw_text)
+        raw_text = re.sub(r"^```", "", raw_text)
+        raw_text = raw_text.rstrip("```").strip()
+
+    try:
+        return json.loads(raw_text)
+    except:
+        pass
+
+    match_obj = re.search(r"\{.*\}", raw_text, re.DOTALL)
+    if match_obj:
+        try:
+            return json.loads(match_obj.group())
+        except:
+            pass
+
+    match_arr = re.search(r"\[.*\]", raw_text, re.DOTALL)
+    if match_arr:
+        try:
+            return json.loads(match_arr.group())
+        except:
+            pass
+
+    raise Exception(f"Gemini output bukan JSON valid:\n{raw_text[:1000]}")
+
+
+# ==============================
+# GET TOTAL ROW
+# ==============================
+
+def _get_total_row(pdf_path, invoice_name):
+
+    raw = _call_gemini(
+        pdf_path,
+        ROW_SYSTEM_INSTRUCTION,
+        invoice_name,
+        po_json_uri=None
+    )
+
+    print("=== RAW TOTAL ROW RESPONSE ===")
+    print(raw)
+
+    data = _parse_json_safe(raw)
+
+    if isinstance(data, dict) and "total_row" in data:
+        return int(data["total_row"])
+
+    raise Exception(f"total_row tidak ditemukan di response: {data}")
+
+
+# ==============================
 # DOWNLOAD PO JSON + UPLOAD AS FILE
 # ==============================
 
@@ -50,11 +112,9 @@ def _download_and_upload_po_json(invoice_name):
 
     po_blob = json_files[0]
 
-    # Download locally
     local_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
     po_blob.download_to_filename(local_tmp.name)
 
-    # Upload ke tmp folder supaya konsisten
     tmp_blob_path = f"tmp/gemini_input/{invoice_name}_po.json"
     bucket.blob(tmp_blob_path).upload_from_filename(
         local_tmp.name,
@@ -125,7 +185,7 @@ def _upload_temp_pdf_to_gcs(local_path, invoice_name):
 
 
 # ==============================
-# GEMINI CALL (PDF + JSON FILE)
+# GEMINI CALL
 # ==============================
 
 def _call_gemini(pdf_path, prompt, invoice_name, po_json_uri=None):
@@ -139,7 +199,6 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_uri=None):
         )
     ]
 
-    # 🔥 PO JSON sekarang sebagai FILE
     if po_json_uri:
         parts.append(
             types.Part.from_uri(
@@ -148,9 +207,7 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_uri=None):
             )
         )
 
-    parts.append(
-        types.Part.from_text(text=prompt)
-    )
+    parts.append(types.Part.from_text(text=prompt))
 
     try:
         response = genai_client.models.generate_content(
@@ -190,6 +247,71 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_uri=None):
 
 
 # ==============================
+# SAVE BATCH TMP
+# ==============================
+
+def _save_batch_tmp(invoice_name, batch_no, json_array):
+
+    if not isinstance(json_array, list):
+        raise Exception("Batch result bukan array")
+
+    bucket = storage_client.bucket(BUCKET_NAME)
+
+    blob_path = f"{TMP_PREFIX}/{invoice_name}_batch_{batch_no}.json"
+
+    bucket.blob(blob_path).upload_from_string(
+        json.dumps(json_array, indent=2),
+        content_type="application/json"
+    )
+
+
+# ==============================
+# MERGE ALL BATCHES
+# ==============================
+
+def _merge_all_batches(invoice_name):
+
+    bucket = storage_client.bucket(BUCKET_NAME)
+    blobs = list(bucket.list_blobs(prefix=f"{TMP_PREFIX}/{invoice_name}_batch_"))
+
+    all_rows = []
+
+    for blob in blobs:
+        content = blob.download_as_text()
+        data = json.loads(content)
+        if isinstance(data, list):
+            all_rows.extend(data)
+
+    return all_rows
+
+
+# ==============================
+# CONVERT TO CSV
+# ==============================
+
+def _convert_to_csv(invoice_name, rows):
+
+    if not rows:
+        raise Exception("Tidak ada data untuk CSV")
+
+    keys = rows[0].keys()
+
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+
+    with open(tmp_file.name, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    bucket = storage_client.bucket(BUCKET_NAME)
+    blob_path = f"output/{invoice_name}.csv"
+
+    bucket.blob(blob_path).upload_from_filename(tmp_file.name)
+
+    return f"gs://{BUCKET_NAME}/{blob_path}"
+
+
+# ==============================
 # MAIN RUN OCR
 # ==============================
 
@@ -197,14 +319,11 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     bucket = storage_client.bucket(BUCKET_NAME)
 
-    # 🔥 DOWNLOAD + UPLOAD PO AS FILE
     po_json_uri = _download_and_upload_po_json(invoice_name)
 
-    # Merge PDF
     merged_pdf = _merge_pdfs(uploaded_pdf_paths)
     merged_pdf = _compress_pdf_if_needed(merged_pdf)
 
-    # Get total row
     total_row = _get_total_row(merged_pdf, invoice_name)
 
     first_index = 1
@@ -234,6 +353,14 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         first_index = last_index + 1
         batch_no += 1
 
-    # ================= CLEANUP =================
+    # Merge semua batch
+    all_rows = _merge_all_batches(invoice_name)
+
+    # Convert to CSV
+    csv_uri = _convert_to_csv(invoice_name, all_rows)
+
+    # Cleanup TMP
     for blob in bucket.list_blobs(prefix=TMP_PREFIX):
         blob.delete()
+
+    return csv_uri
