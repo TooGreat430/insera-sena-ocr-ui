@@ -196,7 +196,7 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_uri=None):
         parts.append(
             types.Part.from_uri(
                 file_uri=po_json_uri,
-                mime_type="application/json",
+                mime_type="text/plain",
             )
         )
 
