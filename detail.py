@@ -49,7 +49,7 @@ OUTPUT
 DETAIL OUTPUT SCHEMA
 ============================================
 
-{
+{{
   "match_score": "true | false",
   "match_description": "string | null",
 
@@ -159,7 +159,7 @@ DETAIL OUTPUT SCHEMA
   "coo_criteria": "string",
   "coo_origin_country": "string",
   "coo_customer_po_no": "string"
-}
+}}
 
 ===========================================
 GENERAL KNOWLEDGE DETAIL
