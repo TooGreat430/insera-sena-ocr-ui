@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import tempfile
 import os
 import csv
@@ -174,7 +175,7 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_text=None):
             raise Exception("Empty response from Gemini")
 
         if hasattr(response, "text") and response.text:
-            return response.text
+            return response.text.strip()
 
         if response.candidates:
             parts = response.candidates[0].content.parts
@@ -183,7 +184,7 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_text=None):
                 if hasattr(p, "text") and p.text:
                     text_output += p.text
             if text_output:
-                return text_output
+                return text_output.strip()
 
         raise Exception("Gemini response tidak mengandung text")
 
@@ -195,16 +196,42 @@ def _call_gemini(pdf_path, prompt, invoice_name, po_json_text=None):
 # JSON SAFE PARSER
 # ==============================
 
-def _parse_json_safe(text):
+def _parse_json_safe(raw_text):
+    if not raw_text:
+        raise Exception("Gemini returned empty response")
+
+    raw_text = raw_text.strip()
+
+    # Remove markdown block ```json ```
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```json", "", raw_text)
+        raw_text = re.sub(r"^```", "", raw_text)
+        raw_text = raw_text.rstrip("```").strip()
+
+    # Try direct parse
     try:
-        return json.loads(text)
+        return json.loads(raw_text)
     except:
-        text = text.strip()
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1:
-            return json.loads(text[start:end+1])
-        raise Exception("Gemini output bukan JSON valid")
+        pass
+
+    # Try extract JSON object
+    match_obj = re.search(r"\{.*\}", raw_text, re.DOTALL)
+    if match_obj:
+        try:
+            return json.loads(match_obj.group())
+        except:
+            pass
+
+    # Try extract JSON array
+    match_arr = re.search(r"\[.*\]", raw_text, re.DOTALL)
+    if match_arr:
+        try:
+            return json.loads(match_arr.group())
+        except:
+            pass
+
+    raise Exception(f"Gemini output bukan JSON valid:\n{raw_text[:1000]}")
+
 
 
 # ==============================
@@ -213,7 +240,15 @@ def _parse_json_safe(text):
 
 def _get_total_row(pdf_path, invoice_name):
     raw = _call_gemini(pdf_path, ROW_SYSTEM_INSTRUCTION, invoice_name)
-    data = json.loads(raw)
+
+    print("=== RAW TOTAL ROW RESPONSE ===")
+    print(raw)
+
+    data = _parse_json_safe(raw)
+
+    if "total_row" not in data:
+        raise Exception(f"total_row tidak ditemukan di response: {data}")
+
     return int(data["total_row"])
 
 
