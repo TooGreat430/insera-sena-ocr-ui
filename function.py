@@ -92,10 +92,11 @@ def _get_total_row(pdf_path, invoice_name):
 
 
 # ==============================
-# DOWNLOAD PO JSON + UPLOAD AS FILE
+# GET PO JSON URI (DIRECT FROM GCS)
 # ==============================
 
-def _download_and_upload_po_json(invoice_name):
+def _get_po_json_uri():
+
     bucket = storage_client.bucket(BUCKET_NAME)
     blobs = list(bucket.list_blobs(prefix=f"{PO_PREFIX}/"))
 
@@ -112,16 +113,8 @@ def _download_and_upload_po_json(invoice_name):
 
     po_blob = json_files[0]
 
-    local_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-    po_blob.download_to_filename(local_tmp.name)
-
-    tmp_blob_path = f"tmp/gemini_input/{invoice_name}_po.json"
-    bucket.blob(tmp_blob_path).upload_from_filename(
-        local_tmp.name,
-        content_type="application/json"
-    )
-
-    return f"gs://{BUCKET_NAME}/{tmp_blob_path}"
+    # 🔥 LANGSUNG RETURN URI ASLI
+    return f"gs://{BUCKET_NAME}/{po_blob.name}"
 
 
 # ==============================
@@ -319,7 +312,8 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     bucket = storage_client.bucket(BUCKET_NAME)
 
-    po_json_uri = _download_and_upload_po_json(invoice_name)
+    # 🔥 DIRECT PO URI (NO TEMP COPY)
+    po_json_uri = _get_po_json_uri()
 
     merged_pdf = _merge_pdfs(uploaded_pdf_paths)
     merged_pdf = _compress_pdf_if_needed(merged_pdf)
@@ -353,13 +347,10 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         first_index = last_index + 1
         batch_no += 1
 
-    # Merge semua batch
     all_rows = _merge_all_batches(invoice_name)
 
-    # Convert to CSV
     csv_uri = _convert_to_csv(invoice_name, all_rows)
 
-    # Cleanup TMP
     for blob in bucket.list_blobs(prefix=TMP_PREFIX):
         blob.delete()
 
