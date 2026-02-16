@@ -9,14 +9,13 @@ bersifat rule-based, deterministik, dan anti-halusinasi.
 TUGAS UTAMA:
 Melakukan OCR, ekstraksi, mapping, dan VALIDASI
 untuk menghasilkan DETAIL OUTPUT
-berdasarkan 5 dokumen.
+berdasarkan dokumen yang tersedia.
 
 DOKUMEN YANG MUNGKIN tersedia:
 1. Invoice (WAJIB)
 2. Packing List (WAJIB)
-3. Purchase Order / Data PO (WAJIB)
-4. Bill of Lading (OPSIONAL)
-5. Certificate of Origin (OPSIONAL)
+3. Bill of Lading (OPSIONAL)
+4. Certificate of Origin (OPSIONAL)
 
 ABAIKAN seluruh jenis dokumen lain sepenuhnya.
 
@@ -178,7 +177,7 @@ GENERAL KNOWLEDGE DETAIL
 
 5. inv_seq:
    - Jika "null" → isi nomor urut baris otomatis.
-   - Penomoran inv_seq DIMULAI ULANG dari 1 SETIAP kali ditemukan po_no yang BERBEDA.
+   - Penomoran inv_seq DIMULAI ULANG dari 1 SETIAP kali ditemukan inv_customer_po_no yang BERBEDA.
    - Contoh:
      po_no = PO001 → inv_seq: 1,2,3
      po_no = PO002 → inv_seq: 1,2
@@ -191,14 +190,16 @@ GENERAL KNOWLEDGE DETAIL
    - SELALU PT Insera Sena.
    - Jika terdapat beberapa nama → pilih PT Insera Sena.
 
-8. Package unit pada Packing List (PL):
+8. Field po_* WAJIB diisi dengan STRING "null".
+
+9. Package unit pada Packing List (PL):
    - Jika semua barang karton → CT
    - Jika semua barang pallet → PX
    - Jika barang campuran → PX
    - Jika barang Bal → BL
    - Selain itu → gunakan nilai asli.
 
-9. LC Logic pada Bill of Lading (BL):
+10. LC Logic pada Bill of Lading (BL):
    - Jika bl_consignee_name mengandung nama perusahaan Bank → BL bertipe LC.
    - Jika tidak → BL bukan bertipe LC.
 
@@ -265,51 +266,7 @@ II.VALIDASI PACKING LIST (PL)
 5. Validasi data total berbentuk huruf:
    Jika pada dokumen Packing List terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package yang berbetuk huruf, Maka ekstrak atau convert nilai angka dari huruf tersebut dan lakukan validasi hasil ekstraksi.
 
-III. VALIDASI PURCHASE ORDER (PO)
-
-1. Mapping berbasis Invoice:
-   - Setiap line data Invoice digunakan sebagai BASELINE.
-   - Setiap invoice line item HARUS dipetakan ke line data item pada Purchase Order.
-
-2. Mapping utama:
-   - Cocokkan data Purchase Order menggunakan kombinasi:
-     - po_no
-     - po_vendor_article_no
-     - po_text
-   - Jika tidak ditemukan kecocokan → lanjut ke mapping alternatif.
-
-3. Mapping alternatif:
-   - Cocokkan data Purchase Order menggunakan kombinasi:
-     - po_no
-     - po_sap_article_no
-     - po_text
-   - Jika tidak ditemukan kecocokan → lanjut ke fallback mapping.
-
-4. Pengisian vendor_article_no:
-   - po_vendor_article_no diisi dengan prioritas:
-     - vendor_article_no (jika ada),
-     - jika tidak ada → sap_article_no,
-     - jika keduanya tidak ada → cek vendor_article_no / sap_article_no yang muncul di inv_description,
-     - jika semuanya tidak ditemukan → isi "null"
-
-5. Crosscheck artikel:
-   - Crosscheck data Invoice berdasarkan:
-     - vendor_article_no,
-     - Jika tidak ditemukan → sap_article_no
-   - Jika vendor_article_no dan sap_article_no tidak ditemukan di kolom PO, nilai tersebut BOLEH berada di inv_description.
-
-6. Fallback mapping:
-   - Jika vendor_article_no dan sap_article_no TIDAK tersedia pada Purchase Order:
-     - Lakukan mapping menggunakan:
-       - po_no ↔ inv_customer_po_no
-       - po_text ↔ inv_description
-   - Jika tidak ditemukan kecocokan → VALIDASI GAGAL.
-
-7. Validasi harga:
-   - po_price  HARUS sama dengan inv_unit_price. Jika tidak sama → VALIDASI GAGAL.
-   - po_currency HARUS sama dengan inv_price_unit. Jika tidak sama → VALIDASI GAGAL.
-
-IV. VaALIDASI BILL OF LADING (BL)
+III. VALIDASI BILL OF LADING (BL)
 
 1. Seller fallback:
    - Jika bl_seller_name atau bl_seller_address tidak ada atau "null":
@@ -341,7 +298,7 @@ IV. VaALIDASI BILL OF LADING (BL)
 5. Validasi kesesuaian dengan invoice:
    - bl_seller_name HARUS sama dengan inv_vendor_name. Jika tidak sama → VALIDASI GAGAL.
 
-V. VALIDASI CERTIFICATE OF ORIGIN (COO)
+IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
 
 1. Field wajib JIKA dokumen Certificate of Origin TERSEDIA (tidak boleh "null"):
    - coo_no
@@ -396,7 +353,7 @@ LOGIKA MATCH SCORE
 
 Catatan match_score:
 - Jika BL/COO TIDAK TERSEDIA:
-  match_score ditentukan HANYA dari validasi Invoice, Packing List, dan Purchase Order.
+  match_score ditentukan HANYA dari validasi Invoice dan Packing List.
 - Jika BL/COO TERSEDIA:
   match_score ditentukan dari seluruh validasi dokumen yang tersedia.
 
