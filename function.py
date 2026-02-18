@@ -39,37 +39,47 @@ def _parse_json_safe(raw_text: str):
     if not raw_text:
         raise Exception("Gemini returned empty response")
 
-    raw_text = raw_text.strip()
+    s = raw_text.strip()
 
     # strip code fences
-    if raw_text.startswith("```"):
-        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-        raw_text = re.sub(r"\s*```$", "", raw_text)
-        raw_text = raw_text.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+        s = s.strip()
 
-    # try direct
+    # helper: jika hasil json.loads adalah string JSON, decode lagi
+    def _maybe_double_decode(obj):
+        if isinstance(obj, str):
+            t = obj.strip()
+            if t and t[0] in "{[":
+                try:
+                    return json.loads(t)
+                except:
+                    return obj
+        return obj
+
+    # 1) coba direct json.loads (ini juga menangani response_mime_type yg bikin output di-quote) :contentReference[oaicite:1]{index=1}
     try:
-        return json.loads(raw_text)
+        obj = json.loads(s)
+        return _maybe_double_decode(obj)
     except:
         pass
 
-    # try object
-    match_obj = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    if match_obj:
+    # 2) scan cari JSON pertama yang valid (mengatasi prefix: "Here is the JSON requested:")
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(s):
+        if ch not in "{[\"":  # juga coba handle kalau dimulai dari string JSON
+            continue
         try:
-            return json.loads(match_obj.group())
-        except:
-            pass
+            obj, end = decoder.raw_decode(s[i:])
+            obj = _maybe_double_decode(obj)
+            # kalau hasilnya masih string tapi bukan JSON, biarkan
+            return obj
+        except json.JSONDecodeError:
+            continue
 
-    # try array
-    match_arr = re.search(r"\[.*\]", raw_text, re.DOTALL)
-    if match_arr:
-        try:
-            return json.loads(match_arr.group())
-        except:
-            pass
+    raise Exception(f"Gemini output bukan JSON valid:\n{s[:1000]}")
 
-    raise Exception(f"Gemini output bukan JSON valid:\n{raw_text[:1000]}")
 
 # ==============================
 # MERGE PDF
@@ -229,18 +239,35 @@ def _call_gemini_json(pdf_path, prompt, invoice_name, run_id, retries=2):
 # GET TOTAL ROW (untuk batching detail)
 # ==============================
 def _get_total_row(pdf_path, invoice_name, run_id):
+
+    # perketat prompt untuk total_row supaya tidak ada preface
+    prompt = (
+        ROW_SYSTEM_INSTRUCTION
+        + "\n\nOUTPUT RULE: Balas HANYA JSON valid. "
+          "Jangan tulis 'Here is...'. "
+          "Format HARUS salah satu:\n"
+          "1) {\"total_row\": 12}\n"
+          "2) [{\"total_row\": 12}]\n"
+    )
+
     raw, data = _call_gemini_json(
         pdf_path,
-        ROW_SYSTEM_INSTRUCTION,
+        prompt,
         invoice_name,
         run_id,
-        retries=2,
+        retries=3,
     )
 
     if isinstance(data, dict) and "total_row" in data:
         return int(data["total_row"])
 
+    if isinstance(data, list):
+        for it in data:
+            if isinstance(it, dict) and "total_row" in it:
+                return int(it["total_row"])
+
     raise Exception(f"total_row tidak ditemukan di response: {data}")
+
 
 # ==============================
 # SAVE DETAIL BATCH TMP (run-scoped)
