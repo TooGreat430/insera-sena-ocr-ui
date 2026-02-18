@@ -1,4 +1,3 @@
-import io
 import json
 import re
 import tempfile
@@ -21,8 +20,14 @@ from container import CONTAINER_SYSTEM_INSTRUCTION
 from detail import build_detail_prompt
 from row import ROW_SYSTEM_INSTRUCTION
 
-
+# ==============================
+# SETTINGS
+# ==============================
 BATCH_SIZE = 5
+
+# "unique" = pakai run_id random (aman dari overwrite)
+# "single" = pakai run_id tetap "single" (asumsi tidak ada rerun/parallel)
+RUN_ID_MODE = "unique"
 
 storage_client = storage.Client()
 
@@ -33,7 +38,7 @@ genai_client = genai.Client(
 )
 
 # ==============================
-# JSON SAFE PARSER
+# JSON SAFE PARSER (robust)
 # ==============================
 def _parse_json_safe(raw_text: str):
     if not raw_text:
@@ -58,31 +63,29 @@ def _parse_json_safe(raw_text: str):
                     return obj
         return obj
 
-    # 1) coba direct json.loads (ini juga menangani response_mime_type yg bikin output di-quote) :contentReference[oaicite:1]{index=1}
+    # 1) coba direct json.loads
     try:
         obj = json.loads(s)
         return _maybe_double_decode(obj)
     except:
         pass
 
-    # 2) scan cari JSON pertama yang valid (mengatasi prefix: "Here is the JSON requested:")
+    # 2) scan cari JSON pertama yang valid (atasi prefix "Here is ...")
     decoder = json.JSONDecoder()
     for i, ch in enumerate(s):
-        if ch not in "{[\"":  # juga coba handle kalau dimulai dari string JSON
+        if ch not in "{[\"":
             continue
         try:
-            obj, end = decoder.raw_decode(s[i:])
+            obj, _ = decoder.raw_decode(s[i:])
             obj = _maybe_double_decode(obj)
-            # kalau hasilnya masih string tapi bukan JSON, biarkan
             return obj
         except json.JSONDecodeError:
             continue
 
     raise Exception(f"Gemini output bukan JSON valid:\n{s[:1000]}")
 
-
 # ==============================
-# MERGE PDF
+# PDF MERGE
 # ==============================
 def _merge_pdfs(pdf_paths):
     merger = PdfMerger()
@@ -95,7 +98,7 @@ def _merge_pdfs(pdf_paths):
     return out.name
 
 # ==============================
-# COMPRESS PDF
+# PDF COMPRESS
 # ==============================
 def _compress_pdf_if_needed(input_path, max_mb=45):
     size_mb = os.path.getsize(input_path) / (1024 * 1024)
@@ -103,7 +106,6 @@ def _compress_pdf_if_needed(input_path, max_mb=45):
         return input_path
 
     compressed_path = input_path.replace(".pdf", "_compressed.pdf")
-
     cmd = [
         "gs",
         "-sDEVICE=pdfwrite",
@@ -134,133 +136,133 @@ def _gcs_download_json(blob_path: str):
     txt = bucket.blob(blob_path).download_as_text()
     return json.loads(txt)
 
+def _gcs_upload_text(blob_path: str, text: str) -> str:
+    bucket = storage_client.bucket(BUCKET_NAME)
+    bucket.blob(blob_path).upload_from_string(text or "", content_type="text/plain")
+    return f"gs://{BUCKET_NAME}/{blob_path}"
+
 def _cleanup_prefix(prefix: str):
     bucket = storage_client.bucket(BUCKET_NAME)
     for blob in bucket.list_blobs(prefix=prefix):
         blob.delete()
 
 # ==============================
-# UPLOAD PDF TO GCS (run-scoped)
+# UPLOAD MERGED PDF ONCE
 # ==============================
-def _upload_temp_pdf_to_gcs(local_path, invoice_name, run_id):
+def _upload_merged_pdf_to_gcs(local_path, invoice_name, run_id):
     bucket = storage_client.bucket(BUCKET_NAME)
-
-    # run-scoped supaya aman (tidak overwrite)
     blob_path = f"tmp/gemini_input/{invoice_name}/{run_id}/merged.pdf"
     blob = bucket.blob(blob_path)
     blob.upload_from_filename(local_path)
-
     return f"gs://{BUCKET_NAME}/{blob_path}"
 
 # ==============================
-# GEMINI CALL (lebih deterministic)
+# GEMINI CALL USING FILE_URI
 # ==============================
-def _call_gemini(pdf_path, prompt, invoice_name, run_id):
-    file_uri = _upload_temp_pdf_to_gcs(pdf_path, invoice_name, run_id)
+def _extract_response_text(response) -> str:
+    if not response:
+        return ""
+    if hasattr(response, "text") and response.text:
+        return response.text.strip()
+    if getattr(response, "candidates", None):
+        text_output = ""
+        parts_resp = response.candidates[0].content.parts
+        for p in parts_resp:
+            if hasattr(p, "text") and p.text:
+                text_output += p.text
+        return text_output.strip()
+    return ""
 
+def _call_gemini_uri(file_uri: str, prompt: str, config: types.GenerateContentConfig) -> str:
     parts = [
         types.Part.from_uri(file_uri=file_uri, mime_type="application/pdf"),
         types.Part.from_text(text=prompt),
     ]
 
-    # Config utama: paksa "cenderung JSON" dan anti ngelantur
-    cfg_primary = types.GenerateContentConfig(
-        temperature=0.5,
-        top_p=1,
-        max_output_tokens=65535,
-        stop_sequences=["```"],
-        system_instruction=(
-            "Keluarkan HANYA JSON valid sesuai skema. "
-            "DILARANG output teks lain, markdown, atau kode."
-        ),
-        # JSON mode (jika environment kamu support field ini)
-        response_mime_type="application/json",
+    response = genai_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[types.Content(role="user", parts=parts)],
+        config=config,
     )
+    return _extract_response_text(response)
 
-    # Fallback config kalau response_mime_type/system_instruction ditolak API
-    cfg_fallback = types.GenerateContentConfig(
-        temperature=0,
-        top_p=1,
-        max_output_tokens=65535,
-        stop_sequences=["```"],
-    )
-
-    last_err = None
-
-    for cfg in (cfg_primary, cfg_fallback):
-        try:
-            response = genai_client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[types.Content(role="user", parts=parts)],
-                config=cfg,
-            )
-
-            if not response:
-                raise Exception("Empty response from Gemini")
-
-            if hasattr(response, "text") and response.text:
-                return response.text.strip()
-
-            if response.candidates:
-                text_output = ""
-                for p in response.candidates[0].content.parts:
-                    if hasattr(p, "text") and p.text:
-                        text_output += p.text
-                if text_output:
-                    return text_output.strip()
-
-            raise Exception("Gemini response tidak mengandung text")
-
-        except Exception as e:
-            last_err = e
-
-    raise Exception(f"Gemini call failed: {str(last_err)}")
-
-def _call_gemini_json(pdf_path, prompt, invoice_name, run_id, retries=2):
+def _call_gemini_json_uri(
+    file_uri: str,
+    prompt: str,
+    run_prefix: str,
+    debug_name: str,
+    config: types.GenerateContentConfig,
+    retries: int = 2,
+):
     """
-    Wrapper supaya kalau sekali output bukan JSON, kita retry dengan penekanan JSON-only.
+    Call -> parse JSON. Kalau gagal parse, simpan raw ke GCS debug lalu retry.
     """
     last_err = None
     p = prompt
-    for i in range(retries):
-        raw = _call_gemini(pdf_path, p, invoice_name, run_id)
+
+    for attempt in range(1, retries + 1):
+        raw = _call_gemini_uri(file_uri, p, config)
+
+        # simpan raw untuk audit/debug (optional tapi membantu)
+        _gcs_upload_text(f"{run_prefix}/debug/{debug_name}_attempt_{attempt}.txt", raw)
+
         try:
             return raw, _parse_json_safe(raw)
         except Exception as e:
             last_err = e
-            # Perketat prompt untuk retry
-            p = (
-                p
-                + "\n\nIMPORTANT: Output HANYA JSON valid. Jangan sertakan teks lain, jangan sertakan kode."
+            p = p + (
+                "\n\nCRITICAL: Output HARUS murni JSON valid sesuai skema. "
+                "DILARANG ada kalimat pembuka seperti 'Here is...'. "
+                "DILARANG markdown/kode."
             )
+
     raise last_err
 
 # ==============================
-# GET TOTAL ROW (untuk batching detail)
+# GET TOTAL ROW (STRUCTURED OUTPUT)
 # ==============================
-def _get_total_row(pdf_path, invoice_name, run_id):
+def _get_total_row_structured(file_uri: str, run_prefix: str):
+    """
+    Pakai response_schema supaya model 'dipaksa' output JSON object berisi total_row.
+    Ini yang paling stabil untuk menghindari output 'Here is...'.
+    """
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "total_row": {"type": "INTEGER"},
+        },
+        "required": ["total_row"],
+    }
 
-    # perketat prompt untuk total_row supaya tidak ada preface
     prompt = (
         ROW_SYSTEM_INSTRUCTION
-        + "\n\nOUTPUT RULE: Balas HANYA JSON valid. "
-          "Jangan tulis 'Here is...'. "
-          "Format HARUS salah satu:\n"
-          "1) {\"total_row\": 12}\n"
-          "2) [{\"total_row\": 12}]\n"
+        + "\n\nOUTPUT RULE: HANYA JSON valid sesuai schema."
     )
 
-    raw, data = _call_gemini_json(
-        pdf_path,
-        prompt,
-        invoice_name,
-        run_id,
+    cfg = types.GenerateContentConfig(
+        temperature=0.5,
+        top_p=1,
+        max_output_tokens=65535,
+        response_mime_type="application/json",
+        response_schema=schema,
+        system_instruction=(
+            "Output harus JSON valid, tanpa teks tambahan."
+        ),
+    )
+
+    raw, data = _call_gemini_json_uri(
+        file_uri=file_uri,
+        prompt=prompt,
+        run_prefix=run_prefix,
+        debug_name="total_row",
+        config=cfg,
         retries=3,
     )
 
     if isinstance(data, dict) and "total_row" in data:
         return int(data["total_row"])
 
+    # fallback kalau somehow jadi array
     if isinstance(data, list):
         for it in data:
             if isinstance(it, dict) and "total_row" in it:
@@ -268,24 +270,19 @@ def _get_total_row(pdf_path, invoice_name, run_id):
 
     raise Exception(f"total_row tidak ditemukan di response: {data}")
 
-
 # ==============================
-# SAVE DETAIL BATCH TMP (run-scoped)
+# SAVE DETAIL BATCH TMP
 # ==============================
 def _save_detail_batch_tmp(run_prefix, batch_no, json_array):
     if not isinstance(json_array, list):
         raise Exception("Batch result bukan array")
-
     blob_path = f"{run_prefix}/detail/batch_{batch_no:04d}.json"
     _gcs_upload_json(blob_path, json_array)
 
-# ==============================
-# MERGE ALL DETAIL BATCHES (run-scoped)
-# ==============================
 def _merge_all_detail_batches(run_prefix):
     bucket = storage_client.bucket(BUCKET_NAME)
     blobs = list(bucket.list_blobs(prefix=f"{run_prefix}/detail/batch_"))
-    blobs.sort(key=lambda b: b.name)  # penting agar urutan stabil
+    blobs.sort(key=lambda b: b.name)
 
     all_rows = []
     for blob in blobs:
@@ -315,9 +312,6 @@ def _get_po_json_uri():
     po_blob = json_files[0]
     return f"gs://{BUCKET_NAME}/{po_blob.name}"
 
-# ==============================
-# FILTER PO JSON (stream)
-# ==============================
 def _stream_filter_po_lines(target_po_numbers):
     po_uri = _get_po_json_uri()
     parsed = urlparse(po_uri)
@@ -331,11 +325,10 @@ def _stream_filter_po_lines(target_po_numbers):
             po_no = item.get("po_no")
             if po_no in target_po_numbers:
                 matched.append(item)
-
     return matched
 
 # ==============================
-# PO MAPPING -> DETAIL (existing logic)
+# PO MAPPING -> DETAIL
 # ==============================
 def _map_po_to_details(po_lines, detail_rows):
     po_index = {}
@@ -365,7 +358,6 @@ def _map_po_to_details(po_lines, detail_rows):
             vendor_article = (po_line.get("vendor_article_no") or "").strip()
             sap_article = (po_line.get("sap_article_no") or "").strip()
 
-            # EXACT MATCH CONDITIONS
             if inv_article and (inv_article == vendor_article or inv_article == sap_article):
                 chosen = po_line
                 chosen_key = (inv_po, idx)
@@ -385,12 +377,8 @@ def _map_po_to_details(po_lines, detail_rows):
 
     return detail_rows
 
-# ==============================
-# VALIDATE PO DATA -> DETAIL
-# ==============================
 def _validate_po(detail_rows):
     for row in detail_rows:
-        # default: true, akan jadi false jika ada mismatch
         row.setdefault("match_score", "true")
         row.setdefault("match_description", "null")
 
@@ -400,10 +388,8 @@ def _validate_po(detail_rows):
             continue
 
         po_data = row.get("_po_data")
-
         vendor_article = po_data.get("vendor_article_no")
         sap_article = po_data.get("sap_article_no")
-
         final_vendor_article = vendor_article or sap_article or "null"
 
         row["po_no"] = po_data.get("po_no", "null")
@@ -445,7 +431,6 @@ def _validate_po(detail_rows):
 
 # ==============================
 # MAP PO -> TOTAL (isi po_quantity & po_price)
-# Total schema kamu tidak punya po_no, jadi kita ambil PO dari detail.
 # ==============================
 def _append_total_error(total_obj, msg):
     total_obj["match_score"] = "false"
@@ -456,9 +441,6 @@ def _append_total_error(total_obj, msg):
         total_obj["match_description"] = prev + "; " + msg
 
 def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
-    """
-    total_data: JSON ARRAY (1 object) sesuai schema total.py
-    """
     if not isinstance(total_data, list) or not total_data:
         return total_data
 
@@ -474,37 +456,30 @@ def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
         _append_total_error(total_obj, "PO number tidak ditemukan pada output detail")
         return total_data
 
-    # Ambil semua lines untuk semua PO yang muncul di detail
     lines = [l for l in po_lines if l.get("po_no") in po_numbers]
     if not lines:
         _append_total_error(total_obj, "PO lines tidak ditemukan di master PO JSON")
         return total_data
 
-    # po_quantity = sum semua po_quantity numeric
     qty_sum = 0.0
     qty_found = False
     for l in lines:
         q = l.get("po_quantity")
         if q is None:
             continue
-        if isinstance(q, (int, float)):
+        try:
             qty_sum += float(q)
             qty_found = True
-        else:
-            try:
-                qty_sum += float(str(q).strip())
-                qty_found = True
-            except:
-                pass
+        except:
+            pass
 
-    # po_price = unique price across lines (kalau lebih dari 1, ambiguous -> "null" dan fail)
     price_set = set()
     for l in lines:
         p = l.get("po_price")
         if p is None:
             continue
         try:
-            price_set.add(float(str(p).strip()))
+            price_set.add(float(p))
         except:
             pass
 
@@ -512,10 +487,8 @@ def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
     if len(price_set) == 1:
         po_price_value = list(price_set)[0]
     elif len(price_set) > 1:
-        # ambiguitas harga antar item PO
         _append_total_error(total_obj, "PO memiliki lebih dari 1 po_price (ambiguous untuk total)")
 
-    # Isi hanya kalau kosong / null
     if total_obj.get("po_quantity") in (None, "", "null") and qty_found:
         total_obj["po_quantity"] = qty_sum
 
@@ -528,9 +501,6 @@ def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
 # CONVERT ANY JSON -> CSV (upload to GCS)
 # ==============================
 def _convert_any_to_csv_gcs(blob_path, data):
-    """
-    data: dict atau list[dict]
-    """
     if data is None:
         raise Exception("Tidak ada data untuk CSV")
 
@@ -544,7 +514,6 @@ def _convert_any_to_csv_gcs(blob_path, data):
     if not rows:
         raise Exception("Tidak ada row dict untuk CSV")
 
-    # union keys (biar kolom tidak hilang)
     keys = []
     seen = set()
     for r in rows:
@@ -565,35 +534,46 @@ def _convert_any_to_csv_gcs(blob_path, data):
     return f"gs://{BUCKET_NAME}/{blob_path}"
 
 # ==============================
-# MAIN RUN OCR (FINAL FLOW)
+# MAIN RUN OCR
 # ==============================
 def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
-    """
-    Output:
-      - detail_csv (GCS URI)
-      - total_csv (GCS URI, optional)
-      - container_csv (GCS URI, optional)
-      - run_id
-    """
-
-    # Kalau kamu benar-benar tidak butuh run_id:
-    # run_id = "single"
-    run_id = uuid.uuid4().hex[:10]
+    # run_id
+    if RUN_ID_MODE == "single":
+        run_id = "single"
+    else:
+        run_id = uuid.uuid4().hex[:10]
 
     run_prefix = f"{TMP_PREFIX}/results/{invoice_name}/{run_id}"
 
-    # output final path (per output)
+    # output final path
     detail_out_csv = f"output/{invoice_name}/{run_id}/detail.csv"
     total_out_csv = f"output/{invoice_name}/{run_id}/total.csv"
     container_out_csv = f"output/{invoice_name}/{run_id}/container.csv"
 
-    # 2) MERGE & 3) COMPRESS
+    # 2) merge + 3) compress
     merged_pdf = _merge_pdfs(uploaded_pdf_paths)
     merged_pdf = _compress_pdf_if_needed(merged_pdf)
 
-    # 4) OCR DETAIL (batch indexing by total_row)
-    total_row = _get_total_row(merged_pdf, invoice_name, run_id)
+    # upload merged pdf once
+    file_uri = _upload_merged_pdf_to_gcs(merged_pdf, invoice_name, run_id)
 
+    # config umum (json-only fence)
+    cfg_json_only = types.GenerateContentConfig(
+        temperature=65535,
+        top_p=1,
+        max_output_tokens=65535,
+        stop_sequences=["```"],
+        system_instruction=(
+            "Keluarkan HANYA JSON valid sesuai skema. "
+            "DILARANG output teks lain, markdown, atau kode."
+        ),
+        response_mime_type="application/json",
+    )
+
+    # 4) total_row (structured)
+    total_row = _get_total_row_structured(file_uri, run_prefix)
+
+    # 4) detail batching
     first_index = 1
     batch_no = 1
 
@@ -606,54 +586,68 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
             last_index=last_index,
         )
 
-        raw, json_array = _call_gemini_json(merged_pdf, prompt, invoice_name, run_id, retries=2)
+        raw, json_array = _call_gemini_json_uri(
+            file_uri=file_uri,
+            prompt=prompt,
+            run_prefix=run_prefix,
+            debug_name=f"detail_batch_{batch_no:04d}",
+            config=cfg_json_only,
+            retries=2,
+        )
+
         _save_detail_batch_tmp(run_prefix, batch_no, json_array)
 
         first_index = last_index + 1
         batch_no += 1
 
-    # simpan merged detail juga ke tmp
     all_rows = _merge_all_detail_batches(run_prefix)
     _gcs_upload_json(f"{run_prefix}/detail/merged.json", all_rows)
 
     if not all_rows:
         raise Exception("Tidak ada data detail hasil Gemini")
 
-    # 5) OCR TOTAL & CONTAINER (tanpa indexing)
+    # 5) total & container (single call)
     total_data = None
     container_data = None
 
     if with_total_container:
-        raw_total, total_data = _call_gemini_json(
-            merged_pdf, TOTAL_SYSTEM_INSTRUCTION, invoice_name, run_id, retries=2
+        _, total_data = _call_gemini_json_uri(
+            file_uri=file_uri,
+            prompt=TOTAL_SYSTEM_INSTRUCTION,
+            run_prefix=run_prefix,
+            debug_name="total",
+            config=cfg_json_only,
+            retries=2,
         )
         _gcs_upload_json(f"{run_prefix}/total/total.json", total_data)
 
-        raw_container, container_data = _call_gemini_json(
-            merged_pdf, CONTAINER_SYSTEM_INSTRUCTION, invoice_name, run_id, retries=2
+        _, container_data = _call_gemini_json_uri(
+            file_uri=file_uri,
+            prompt=CONTAINER_SYSTEM_INSTRUCTION,
+            run_prefix=run_prefix,
+            debug_name="container",
+            config=cfg_json_only,
+            retries=2,
         )
         _gcs_upload_json(f"{run_prefix}/container/container.json", container_data)
 
-    # 6) Mapping PO hanya untuk DETAIL + TOTAL
+    # 6) mapping PO hanya Detail + Total
     po_numbers = {
         row.get("inv_customer_po_no")
         for row in all_rows
         if row.get("inv_customer_po_no")
     }
-
     po_lines = _stream_filter_po_lines(po_numbers)
 
-    # DETAIL mapping + validate
     all_rows = _map_po_to_details(po_lines, all_rows)
     all_rows = _validate_po(all_rows)
     _gcs_upload_json(f"{run_prefix}/detail/detail_mapped.json", all_rows)
 
-    # TOTAL mapping (isi po_quantity & po_price dari PO master)
     if total_data is not None:
         total_data = _map_po_to_total(total_data, po_lines, po_numbers)
         _gcs_upload_json(f"{run_prefix}/total/total_mapped.json", total_data)
 
-    # 7) Postprocess -> CSV & 8) Save CSV to GCS output
+    # 7-8) csv output
     detail_csv_uri = _convert_any_to_csv_gcs(detail_out_csv, all_rows)
 
     total_csv_uri = None
@@ -664,7 +658,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
     if container_data is not None:
         container_csv_uri = _convert_any_to_csv_gcs(container_out_csv, container_data)
 
-    # cleanup tmp hanya run ini
+    # cleanup tmp run ini saja
     _cleanup_prefix(run_prefix)
 
     return {
