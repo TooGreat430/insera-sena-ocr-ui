@@ -5,17 +5,17 @@ import tempfile
 import os 
 import csv 
 import subprocess 
-import ijson from urllib.parse 
-import urlparse from google.cloud 
-import storage from PyPDF2 
-import PdfMerger from google 
-import genai from google.genai 
-import types from config 
-import * from total 
-import TOTAL_SYSTEM_INSTRUCTION from container 
-import CONTAINER_SYSTEM_INSTRUCTION from detail 
-import build_detail_prompt from row 
-import ROW_SYSTEM_INSTRUCTION 
+import ijson 
+from urllib.parse import urlparse 
+from google.cloud import storage 
+from PyPDF2 import PdfMerger 
+from google import genai 
+from google.genai import types 
+from config import * 
+from total import TOTAL_SYSTEM_INSTRUCTION 
+from container import CONTAINER_SYSTEM_INSTRUCTION 
+from detail import build_detail_prompt 
+from row import ROW_SYSTEM_INSTRUCTION 
 
 BATCH_SIZE = 5 
 storage_client = storage.Client() 
