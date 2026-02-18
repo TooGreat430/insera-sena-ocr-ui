@@ -469,8 +469,16 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         )
 
         raw = _call_gemini(merged_pdf, prompt, invoice_name)
-
+        
+        print("========== RAW GEMINI DETAIL ==========")
+        print(raw)
+        print("========================================")
+        
         json_array = _parse_json_safe(raw)
+
+        print("========== PARSED TYPE ==========")
+        print(type(json_array))
+        print("==================================")
 
         _save_batch_tmp(invoice_name, batch_no, json_array)
 
