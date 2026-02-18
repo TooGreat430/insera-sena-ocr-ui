@@ -25,4 +25,6 @@ Hanya 1 JSON:
   "total_row": <number>
 }
 
+HANYA RETURN SATU JSON VALID SAJA JANGAN TAMBAHKAN KATA-KATA LAIN
+
 """
