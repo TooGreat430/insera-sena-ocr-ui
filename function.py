@@ -194,16 +194,13 @@ def _call_gemini_json_uri(
     config: types.GenerateContentConfig,
     retries: int = 2,
 ):
-    """
-    Call -> parse JSON. Kalau gagal parse, simpan raw ke GCS debug lalu retry.
-    """
     last_err = None
     p = prompt
 
     for attempt in range(1, retries + 1):
         raw = _call_gemini_uri(file_uri, p, config)
 
-        # simpan raw untuk audit/debug (optional tapi membantu)
+        # simpan raw untuk audit/debug
         _gcs_upload_text(f"{run_prefix}/debug/{debug_name}_attempt_{attempt}.txt", raw)
 
         try:
@@ -222,35 +219,27 @@ def _call_gemini_json_uri(
 # GET TOTAL ROW (STRUCTURED OUTPUT)
 # ==============================
 def _get_total_row_structured(file_uri: str, run_prefix: str):
-    """
-    Pakai response_schema supaya model 'dipaksa' output JSON object berisi total_row.
-    Ini yang paling stabil untuk menghindari output 'Here is...'.
-    """
-    schema = {
-        "type": "OBJECT",
-        "properties": {
-            "total_row": {"type": "INTEGER"},
+    # schema native SDK (lebih aman)
+    schema = types.Schema(
+        type=types.Type.OBJECT,
+        required=["total_row"],
+        properties={
+            "total_row": types.Schema(type=types.Type.INTEGER),
         },
-        "required": ["total_row"],
-    }
-
-    prompt = (
-        ROW_SYSTEM_INSTRUCTION
-        + "\n\nOUTPUT RULE: HANYA JSON valid sesuai schema."
     )
+
+    prompt = ROW_SYSTEM_INSTRUCTION + "\n\nOUTPUT RULE: HANYA JSON valid sesuai schema."
 
     cfg = types.GenerateContentConfig(
-        temperature=0.5,
+        temperature=0,
         top_p=1,
-        max_output_tokens=65535,
+        max_output_tokens=64,
         response_mime_type="application/json",
         response_schema=schema,
-        system_instruction=(
-            "Output harus JSON valid, tanpa teks tambahan."
-        ),
+        system_instruction="Output harus JSON valid, tanpa teks tambahan.",
     )
 
-    raw, data = _call_gemini_json_uri(
+    _, data = _call_gemini_json_uri(
         file_uri=file_uri,
         prompt=prompt,
         run_prefix=run_prefix,
@@ -262,7 +251,6 @@ def _get_total_row_structured(file_uri: str, run_prefix: str):
     if isinstance(data, dict) and "total_row" in data:
         return int(data["total_row"])
 
-    # fallback kalau somehow jadi array
     if isinstance(data, list):
         for it in data:
             if isinstance(it, dict) and "total_row" in it:
@@ -271,7 +259,7 @@ def _get_total_row_structured(file_uri: str, run_prefix: str):
     raise Exception(f"total_row tidak ditemukan di response: {data}")
 
 # ==============================
-# SAVE DETAIL BATCH TMP
+# SAVE / MERGE DETAIL BATCHES
 # ==============================
 def _save_detail_batch_tmp(run_prefix, batch_no, json_array):
     if not isinstance(json_array, list):
@@ -292,7 +280,7 @@ def _merge_all_detail_batches(run_prefix):
     return all_rows
 
 # ==============================
-# GET PO JSON URI (DIRECT FROM GCS)
+# GET PO JSON URI & FILTER (stream)
 # ==============================
 def _get_po_json_uri():
     bucket = storage_client.bucket(BUCKET_NAME)
@@ -538,14 +526,9 @@ def _convert_any_to_csv_gcs(blob_path, data):
 # ==============================
 def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
     # run_id
-    if RUN_ID_MODE == "single":
-        run_id = "single"
-    else:
-        run_id = uuid.uuid4().hex[:10]
-
+    run_id = "single" if RUN_ID_MODE == "single" else uuid.uuid4().hex[:10]
     run_prefix = f"{TMP_PREFIX}/results/{invoice_name}/{run_id}"
 
-    # output final path
     detail_out_csv = f"output/{invoice_name}/{run_id}/detail.csv"
     total_out_csv = f"output/{invoice_name}/{run_id}/total.csv"
     container_out_csv = f"output/{invoice_name}/{run_id}/container.csv"
@@ -557,12 +540,11 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
     # upload merged pdf once
     file_uri = _upload_merged_pdf_to_gcs(merged_pdf, invoice_name, run_id)
 
-    # config umum (json-only fence)
+    # config umum (json-only fence)  ✅ stop_sequences DIHAPUS
     cfg_json_only = types.GenerateContentConfig(
-        temperature=0.5,
+        temperature=0,
         top_p=1,
         max_output_tokens=65535,
-        stop_sequences=["```"],
         system_instruction=(
             "Keluarkan HANYA JSON valid sesuai skema. "
             "DILARANG output teks lain, markdown, atau kode."
@@ -586,7 +568,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
             last_index=last_index,
         )
 
-        raw, json_array = _call_gemini_json_uri(
+        _, json_array = _call_gemini_json_uri(
             file_uri=file_uri,
             prompt=prompt,
             run_prefix=run_prefix,
@@ -658,7 +640,6 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
     if container_data is not None:
         container_csv_uri = _convert_any_to_csv_gcs(container_out_csv, container_data)
 
-    # cleanup tmp run ini saja
     _cleanup_prefix(run_prefix)
 
     return {
