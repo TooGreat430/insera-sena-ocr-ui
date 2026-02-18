@@ -1,10 +1,35 @@
-import io import json import re import tempfile import os import csv import subprocess import ijson from urllib.parse import urlparse from google.cloud import storage from PyPDF2 import PdfMerger from google import genai from google.genai import types from config import * from total import TOTAL_SYSTEM_INSTRUCTION from container import CONTAINER_SYSTEM_INSTRUCTION from detail import build_detail_prompt from row import ROW_SYSTEM_INSTRUCTION BATCH_SIZE = 5 storage_client = storage.Client() genai_client = genai.Client( vertexai=True, project=PROJECT_ID, location=LOCATION, ) # ============================== # JSON SAFE PARSER # ============================== def _parse_json_safe(raw_text): if not raw_text: raise Exception("Gemini returned empty response") raw_text = raw_text.strip() if raw_text.startswith("
-"):
-        raw_text = re.sub(r"^
-(?:json)?\s*", "", raw_text) raw_text = re.sub(r"\s*
-$", "", raw_text)
-        raw_text = raw_text.strip()
+import io 
+import json 
+import re 
+import tempfile 
+import os 
+import csv 
+import subprocess 
+import ijson from urllib.parse 
+import urlparse from google.cloud 
+import storage from PyPDF2 
+import PdfMerger from google 
+import genai from google.genai 
+import types from config 
+import * from total 
+import TOTAL_SYSTEM_INSTRUCTION from container 
+import CONTAINER_SYSTEM_INSTRUCTION from detail 
+import build_detail_prompt from row 
+import ROW_SYSTEM_INSTRUCTION 
 
+BATCH_SIZE = 5 
+storage_client = storage.Client() 
+genai_client = genai.Client( vertexai=True, project=PROJECT_ID, location=LOCATION, ) 
+
+# ============================== # JSON SAFE PARSER # ============================== 
+def _parse_json_safe(raw_text): 
+    if not raw_text: 
+        raise Exception("Gemini returned empty response") 
+    raw_text = raw_text.strip() 
+    if raw_text.startswith(""):
+        raw_text = re.sub(r"^(?:json)?\s*", "", raw_text) 
+        raw_text = re.sub(r"\s*$", "", raw_text)
+        raw_text = raw_text.strip()
     try:
         return json.loads(raw_text)
     except:
