@@ -64,6 +64,7 @@ TOTAL OUTPUT SCHEMA
   "inv_total_volume": "number",
   "inv_total_package": "number",
 
+  "pl_package_unit": "string",
   "pl_package_count": "number",
   "pl_weight_unit": "string",
   "pl_nw": "number",
@@ -112,7 +113,8 @@ GENERAL KNOWLEDGE TOTAL
 2. Kolom match_score dan match_description akan selalu ada di posisi paling atas dari line of JSON
 3. Jika value amount tidak diketahui pada dokumen, value amount dapat dicari dengan rumus Quantity * Unit Price = Amount
 4. Terkadang output pada kolom total berbentuk huruf. Tolong convert ke dalam bentuk angka
-5. LC Logic:
+5. Field po_* WAJIB diisi dengan STRING "null".
+6. LC Logic:
    -Jika Consignee terdapat nama perusahaan Bank, maka dokumen BL merupakan tipe LC
    -Jika Consignee tidak terdapat nama perusahaan Bank, maka dokumen BL bukan merupakan tipe LC
 
