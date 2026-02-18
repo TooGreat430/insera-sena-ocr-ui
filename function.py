@@ -162,16 +162,54 @@ def _upload_merged_pdf_to_gcs(local_path, invoice_name, run_id):
 def _extract_response_text(response) -> str:
     if not response:
         return ""
-    if hasattr(response, "text") and response.text:
-        return response.text.strip()
-    if getattr(response, "candidates", None):
-        text_output = ""
-        parts_resp = response.candidates[0].content.parts
-        for p in parts_resp:
-            if hasattr(p, "text") and p.text:
-                text_output += p.text
-        return text_output.strip()
-    return ""
+
+    # 1) Structured output (response_schema) biasanya masuk ke sini
+    parsed = getattr(response, "parsed", None)
+    if parsed is not None:
+        try:
+            return json.dumps(parsed, ensure_ascii=False)
+        except Exception:
+            return str(parsed)
+
+    # 2) Normal text shortcut (kalau ada)
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    # 3) Kandidat -> content -> parts (parts bisa None)
+    cands = getattr(response, "candidates", None) or []
+    if cands:
+        cand0 = cands[0]
+        content = getattr(cand0, "content", None)
+
+        parts = getattr(content, "parts", None)
+        if isinstance(parts, list):
+            out = ""
+            for part in parts:
+                t = getattr(part, "text", None)
+                if isinstance(t, str) and t:
+                    out += t
+            if out.strip():
+                return out.strip()
+
+        # beberapa versi mungkin punya content.text
+        ctext = getattr(content, "text", None)
+        if isinstance(ctext, str) and ctext.strip():
+            return ctext.strip()
+
+    # 4) Last resort: serialize response supaya debug kamu tetap ada isi
+    for meth in ("model_dump_json", "to_json"):
+        fn = getattr(response, meth, None)
+        if callable(fn):
+            try:
+                s = fn()
+                if isinstance(s, str) and s.strip():
+                    return s
+            except Exception:
+                pass
+
+    return str(response)
+
 
 def _call_gemini_uri(file_uri: str, prompt: str, config: types.GenerateContentConfig) -> str:
     parts = [
