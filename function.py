@@ -559,7 +559,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
 
     # config umum (json-only fence)
     cfg_json_only = types.GenerateContentConfig(
-        temperature=65535,
+        temperature=0.5,
         top_p=1,
         max_output_tokens=65535,
         stop_sequences=["```"],
