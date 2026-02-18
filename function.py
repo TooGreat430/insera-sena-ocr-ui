@@ -1,71 +1,21 @@
-import json
-import re
-import tempfile
-import os
-import csv
-import subprocess
-import ijson
-from urllib.parse import urlparse
-
-from google.cloud import storage
-from PyPDF2 import PdfMerger
-
-from google import genai
-from google.genai import types
-
-from config import *
-from total import TOTAL_SYSTEM_INSTRUCTION
-from container import CONTAINER_SYSTEM_INSTRUCTION
-from detail import build_detail_prompt
-from row import ROW_SYSTEM_INSTRUCTION
-
-# ==============================
-# SETTINGS
-# ==============================
-BATCH_SIZE = 5
-
-# "unique" = pakai run_id random (aman dari overwrite)
-# "single" = pakai run_id tetap "single" (asumsi tidak ada rerun/parallel)
-RUN_ID_MODE = "unique"
-
-storage_client = storage.Client()
-
-genai_client = genai.Client(
-    vertexai=True,
-    project=PROJECT_ID,
-    location=LOCATION,
-)
-
-# ==============================
-# JSON SAFE PARSER (robust)
-# ==============================
-
-def _parse_json_safe(raw_text):
-
-    if not raw_text:
-        raise Exception("Gemini returned empty response")
-
-    s = raw_text.strip()
-
-    if raw_text.startswith("```"):
-        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-        raw_text = re.sub(r"\s*```$", "", raw_text)
+import io import json import re import tempfile import os import csv import subprocess import ijson from urllib.parse import urlparse from google.cloud import storage from PyPDF2 import PdfMerger from google import genai from google.genai import types from config import * from total import TOTAL_SYSTEM_INSTRUCTION from container import CONTAINER_SYSTEM_INSTRUCTION from detail import build_detail_prompt from row import ROW_SYSTEM_INSTRUCTION BATCH_SIZE = 5 storage_client = storage.Client() genai_client = genai.Client( vertexai=True, project=PROJECT_ID, location=LOCATION, ) # ============================== # JSON SAFE PARSER # ============================== def _parse_json_safe(raw_text): if not raw_text: raise Exception("Gemini returned empty response") raw_text = raw_text.strip() if raw_text.startswith("
+"):
+        raw_text = re.sub(r"^
+(?:json)?\s*", "", raw_text) raw_text = re.sub(r"\s*
+$", "", raw_text)
         raw_text = raw_text.strip()
 
     try:
-        obj = json.loads(s)
-        return _maybe_double_decode(obj)
+        return json.loads(raw_text)
     except:
         pass
 
     match_obj = re.search(r"\{.*\}", raw_text, re.DOTALL)
     if match_obj:
         try:
-            obj, _ = decoder.raw_decode(s[i:])
-            obj = _maybe_double_decode(obj)
-            return obj
-        except json.JSONDecodeError:
-            continue
+            return json.loads(match_obj.group())
+        except:
+            pass
 
     match_arr = re.search(r"\[.*\]", raw_text, re.DOTALL)
     if match_arr:
@@ -77,7 +27,7 @@ def _parse_json_safe(raw_text):
     raise Exception(f"Gemini output bukan JSON valid:\n{raw_text[:1000]}")
 
 # ==============================
-# PDF MERGE
+# MERGE PDF
 # ==============================
 
 def _merge_pdfs(pdf_paths):
@@ -93,7 +43,7 @@ def _merge_pdfs(pdf_paths):
     return out.name
 
 # ==============================
-# PDF COMPRESS
+# COMPRESS PDF
 # ==============================
 
 def _compress_pdf_if_needed(input_path, max_mb=45):
@@ -103,6 +53,7 @@ def _compress_pdf_if_needed(input_path, max_mb=45):
         return input_path
 
     compressed_path = input_path.replace(".pdf", "_compressed.pdf")
+
     cmd = [
         "gs",
         "-sDEVICE=pdfwrite",
@@ -129,6 +80,7 @@ def _upload_temp_pdf_to_gcs(local_path, invoice_name):
     blob_path = f"tmp/gemini_input/{invoice_name}_merged.pdf"
     blob = bucket.blob(blob_path)
     blob.upload_from_filename(local_path)
+
     return f"gs://{BUCKET_NAME}/{blob_path}"
 
 # ==============================
@@ -139,55 +91,6 @@ def _call_gemini(pdf_path, prompt, invoice_name):
 
     file_uri = _upload_temp_pdf_to_gcs(pdf_path, invoice_name)
 
-    # 1) Structured output (response_schema) biasanya masuk ke sini
-    parsed = getattr(response, "parsed", None)
-    if parsed is not None:
-        try:
-            return json.dumps(parsed, ensure_ascii=False)
-        except Exception:
-            return str(parsed)
-
-    # 2) Normal text shortcut (kalau ada)
-    text = getattr(response, "text", None)
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-
-    # 3) Kandidat -> content -> parts (parts bisa None)
-    cands = getattr(response, "candidates", None) or []
-    if cands:
-        cand0 = cands[0]
-        content = getattr(cand0, "content", None)
-
-        parts = getattr(content, "parts", None)
-        if isinstance(parts, list):
-            out = ""
-            for part in parts:
-                t = getattr(part, "text", None)
-                if isinstance(t, str) and t:
-                    out += t
-            if out.strip():
-                return out.strip()
-
-        # beberapa versi mungkin punya content.text
-        ctext = getattr(content, "text", None)
-        if isinstance(ctext, str) and ctext.strip():
-            return ctext.strip()
-
-    # 4) Last resort: serialize response supaya debug kamu tetap ada isi
-    for meth in ("model_dump_json", "to_json"):
-        fn = getattr(response, meth, None)
-        if callable(fn):
-            try:
-                s = fn()
-                if isinstance(s, str) and s.strip():
-                    return s
-            except Exception:
-                pass
-
-    return str(response)
-
-
-def _call_gemini_uri(file_uri: str, prompt: str, config: types.GenerateContentConfig) -> str:
     parts = [
         types.Part.from_uri(
             file_uri=file_uri,
@@ -252,11 +155,6 @@ def _get_total_row(pdf_path, invoice_name):
     if isinstance(data, dict) and "total_row" in data:
         return int(data["total_row"])
 
-    if isinstance(data, list):
-        for it in data:
-            if isinstance(it, dict) and "total_row" in it:
-                return int(it["total_row"])
-
     raise Exception(f"total_row tidak ditemukan di response: {data}")
 
 # ==============================
@@ -297,7 +195,7 @@ def _merge_all_batches(invoice_name):
     return all_rows
 
 # ==============================
-# GET PO JSON URI & FILTER (stream)
+# GET PO JSON URI (DIRECT FROM GCS)
 # ==============================
 
 def _get_po_json_uri():
@@ -340,6 +238,7 @@ def _stream_filter_po_lines(target_po_numbers):
             po_no = item.get("po_no")
             if po_no in target_po_numbers:
                 matched.append(item)
+
     return matched
 
 # ==============================
@@ -418,6 +317,7 @@ def _validate_po(detail_rows):
             continue
 
         po_data = row.get("_po_data")
+
         vendor_article = po_data.get("vendor_article_no")
         sap_article = po_data.get("sap_article_no")
 
@@ -555,6 +455,7 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         for row in all_rows
         if row.get("inv_customer_po_no")
     }
+
     po_lines = _stream_filter_po_lines(po_numbers)
 
     # MAP PO TO DETAIL
