@@ -43,9 +43,9 @@ def _parse_json_safe(raw_text):
     raw_text = raw_text.strip()
 
     if raw_text.startswith("```"):
-        raw_text = re.sub(r"^```json", "", raw_text)
-        raw_text = re.sub(r"^```", "", raw_text)
-        raw_text = raw_text.rstrip("```").strip()
+        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+        raw_text = re.sub(r"\s*```$", "", raw_text)
+        raw_text = raw_text.strip()
 
     try:
         return json.loads(raw_text)
