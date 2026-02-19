@@ -56,6 +56,31 @@ def _parse_json_safe(raw_text: str):
 
     raise Exception(f"Gemini output bukan JSON valid:\n{raw_text[:1500]}")
 
+def _coerce_detail_batch_to_list(parsed):
+    if isinstance(parsed, list):
+        return parsed
+
+    if isinstance(parsed, dict):
+        # common wrapper keys
+        for k in ("rows", "items", "data", "result", "details", "detail", "line_items", "lineItems"):
+            v = parsed.get(k)
+            if isinstance(v, list):
+                return v
+
+        # dict numeric keys -> list (sorted)
+        try:
+            keys = list(parsed.keys())
+            if keys and all(str(k).isdigit() for k in keys):
+                return [parsed[k] for k in sorted(keys, key=lambda x: int(str(x)))]
+        except:
+            pass
+
+        # if it looks like a single row dict, wrap it
+        return [parsed]
+
+    # anything else -> empty
+    return []
+
 # ==============================
 # MERGE PDF
 # ==============================
@@ -219,9 +244,14 @@ def _get_total_row(pdf_path, invoice_name, run_prefix):
 # ==============================
 
 def _save_detail_batch_tmp(run_prefix, batch_no, json_array):
-
+    # coerce to list if needed
     if not isinstance(json_array, list):
-        raise Exception("Batch result bukan array")
+        json_array = _coerce_detail_batch_to_list(json_array)
+
+    if not isinstance(json_array, list) or len(json_array) == 0:
+        raise Exception(
+            f"Batch result bukan array / kosong. batch_no={batch_no}, type={type(json_array)}"
+        )
 
     blob_path = f"{run_prefix}/tmp_result/detail/batch_{batch_no:04d}.json"
     _gcs_upload_json(blob_path, json_array)
@@ -685,16 +715,24 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container=True):
         last = min(first + BATCH_SIZE - 1, total_row)
         prompt = build_detail_prompt(total_row=total_row, first_index=first, last_index=last)
 
-        raw = _call_gemini(merged_pdf, prompt, invoice_name, run_prefix, expect_json=True)
-        arr = _parse_json_safe(raw)
-        _save_detail_batch_tmp(run_prefix, batch_no, arr)
+    raw = _call_gemini(merged_pdf, prompt, invoice_name, run_prefix, expect_json=True)
 
-        first = last + 1
-        batch_no += 1
+    # PARSE + COERCE
+    parsed = _parse_json_safe(raw)
+    arr = _coerce_detail_batch_to_list(parsed)
 
-    detail_rows = _merge_all_detail_batches(run_prefix)
-    if not detail_rows:
-        raise Exception("Tidak ada data detail hasil Gemini")
+    # optional: fail-fast with helpful debug saved to GCS
+    if not arr:
+        _gcs_upload_json(
+            f"{run_prefix}/tmp_result/detail/batch_{batch_no:04d}_raw_debug.json",
+            {"raw": raw, "parsed_type": str(type(parsed)), "parsed": parsed},
+        )
+        raise Exception(f"Detail batch kosong/tidak valid. Debug saved. batch_no={batch_no}")
+
+    _save_detail_batch_tmp(run_prefix, batch_no, arr)
+
+    first = last + 1
+    batch_no += 1
 
     # 4) total + container
     total_data = None
