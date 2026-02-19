@@ -4,6 +4,7 @@ from function import run_ocr
 from google.cloud import storage
 from config import BUCKET_NAME, TMP_PREFIX
 import os
+import re
 
 st.set_page_config(layout="wide")
 
@@ -83,7 +84,7 @@ if menu == "Report":
         ["detail", "total", "container"]
     )
 
-    result_prefix = f"result/{report_type}/"
+    result_prefix = f"output/{report_type}/"
     tmp_prefix = "tmp/result/"
 
     result_blobs = list(storage_client.list_blobs(BUCKET_NAME, prefix=result_prefix))
@@ -104,16 +105,18 @@ if menu == "Report":
 
     running_invoices = set()
 
+    batch_re = re.compile(r"^(?P<inv>.+)_batch_\d+\.json$")
+
     for blob in tmp_blobs:
         name = os.path.basename(blob.name)
+        m = batch_re.match(name)
+        if m:
+            running_invoices.add(m.group("inv"))
 
-        if "__" in name and name.endswith(".json"):
-            invoice_name = name.split("_detail__")[0]
-            running_invoices.add(invoice_name)
 
     for invoice in running_invoices:
         # check if already marked done
-        already_done = any(invoice in f["invoice"] for f in files_data)
+        already_done = any(os.path.splitext(f["invoice"])[0] == invoice for f in files_data)
 
         if not already_done:
             files_data.append({

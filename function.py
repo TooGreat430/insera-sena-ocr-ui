@@ -424,6 +424,126 @@ def _validate_po(detail_rows):
 
     return detail_rows
 
+# ==============================
+# (NEW) MAP PO -> TOTAL
+# ==============================
+def _append_total_error(total_obj, msg):
+    total_obj["match_score"] = "false"
+    prev = total_obj.get("match_description") or "null"
+    if prev == "null":
+        total_obj["match_description"] = msg
+    else:
+        total_obj["match_description"] = prev + "; " + msg
+
+def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
+    """
+    total_data bisa dict atau list[dict]
+    Kita isi/validasi field PO di TOTAL berdasarkan po_lines yang relevan.
+    """
+    if total_data is None:
+        return None
+
+    # normalize dict -> list
+    if isinstance(total_data, dict):
+        total_data = [total_data]
+
+    if not isinstance(total_data, list) or not total_data or not isinstance(total_data[0], dict):
+        return total_data
+
+    total_obj = total_data[0]
+    total_obj.setdefault("match_score", "true")
+    total_obj.setdefault("match_description", "null")
+
+    po_numbers = {p for p in po_numbers_from_detail if p}
+    if not po_numbers:
+        _append_total_error(total_obj, "PO number tidak ditemukan pada output detail")
+        return total_data
+
+    lines = [l for l in po_lines if l.get("po_no") in po_numbers]
+    if not lines:
+        _append_total_error(total_obj, "PO lines tidak ditemukan di master PO JSON")
+        return total_data
+
+    # contoh isi: total po_quantity = sum
+    qty_sum = 0.0
+    qty_found = False
+    for l in lines:
+        q = l.get("po_quantity")
+        if q is None:
+            continue
+        try:
+            qty_sum += float(str(q).strip())
+            qty_found = True
+        except:
+            pass
+
+    # contoh isi: po_price harus unik
+    price_set = set()
+    for l in lines:
+        p = l.get("po_price")
+        if p is None:
+            continue
+        try:
+            price_set.add(float(str(p).strip()))
+        except:
+            pass
+
+    expected_price = None
+    if len(price_set) == 1:
+        expected_price = list(price_set)[0]
+    elif len(price_set) > 1:
+        _append_total_error(total_obj, "PO memiliki lebih dari 1 po_price (ambiguous untuk total)")
+
+    # fill kalau kosong/null
+    if total_obj.get("po_quantity") in (None, "", "null") and qty_found:
+        total_obj["po_quantity"] = qty_sum
+
+    if total_obj.get("po_price") in (None, "", "null") and expected_price is not None:
+        total_obj["po_price"] = expected_price
+
+    return total_data
+
+
+# ==============================
+# (NEW) CONVERT TO CSV -> CUSTOM FOLDER/PATH
+# ==============================
+def _convert_to_csv_path(blob_path, rows):
+    if rows is None:
+        raise Exception("Tidak ada data untuk CSV")
+
+    # normalize dict -> list
+    if isinstance(rows, dict):
+        rows = [rows]
+
+    if not isinstance(rows, list) or not rows:
+        raise Exception("Tidak ada data untuk CSV")
+
+    # union keys biar kolom lengkap
+    keys = []
+    seen = set()
+    for r in rows:
+        if isinstance(r, dict):
+            for k in r.keys():
+                if k not in seen:
+                    seen.add(k)
+                    keys.append(k)
+
+    if not keys:
+        raise Exception("Row CSV tidak memiliki kolom")
+
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+    with open(tmp_file.name, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r if isinstance(r, dict) else {})
+
+    bucket = storage_client.bucket(BUCKET_NAME)
+    bucket.blob(blob_path).upload_from_filename(tmp_file.name)
+
+    return f"gs://{BUCKET_NAME}/{blob_path}"
+
+
 # =========================================================
 # CONVERT TO CSV
 # =========================================================
@@ -508,10 +628,27 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
     po_numbers = {
         row.get("inv_customer_po_no")
         for row in all_rows
-        if row.get("inv_customer_po_no")
+        if isinstance(row, dict) and row.get("inv_customer_po_no")
     }
 
+
     po_lines = _stream_filter_po_lines(po_numbers)
+
+    total_data = None
+    container_data = None
+
+    if with_total_container:
+        # OCR TOTAL
+        raw_total = _call_gemini(merged_pdf, TOTAL_SYSTEM_INSTRUCTION, invoice_name)
+        total_data = _parse_json_safe(raw_total)
+        if isinstance(total_data, dict):
+            total_data = [total_data]
+
+        # OCR CONTAINER
+        raw_container = _call_gemini(merged_pdf, CONTAINER_SYSTEM_INSTRUCTION, invoice_name)
+        container_data = _parse_json_safe(raw_container)
+        if isinstance(container_data, dict):
+            container_data = [container_data]
 
     # MAP PO TO DETAIL
     all_rows = _map_po_to_details(po_lines, all_rows)
@@ -519,11 +656,33 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
     # VALIDATE PO
     all_rows = _validate_po(all_rows)
 
+    # ==============================
+    # (NEW) MAP PO TO TOTAL (DETAIL tetap batch, TOTAL tidak batch)
+    # ==============================
+    if total_data is not None:
+        total_data = _map_po_to_total(total_data, po_lines, po_numbers)
+
     # CONVERT TO CSV
-    csv_uri = _convert_to_csv(invoice_name, all_rows)
+    # ==============================
+    # (NEW) OUTPUT PER FOLDER
+    # ==============================
+    detail_csv_uri = _convert_to_csv_path(f"output/detail/{invoice_name}.csv", all_rows)
+
+    total_csv_uri = None
+    if total_data is not None:
+        total_csv_uri = _convert_to_csv_path(f"output/total/{invoice_name}.csv", total_data)
+
+    container_csv_uri = None
+    if container_data is not None:
+        container_csv_uri = _convert_to_csv_path(f"output/container/{invoice_name}.csv", container_data)
+
 
     # CLEAN TEMP FILES
     for blob in bucket.list_blobs(prefix=TMP_PREFIX):
         blob.delete()
 
-    return csv_uri
+    return {
+        "detail_csv": detail_csv_uri,
+        "total_csv": total_csv_uri,
+        "container_csv": container_csv_uri,
+    }
