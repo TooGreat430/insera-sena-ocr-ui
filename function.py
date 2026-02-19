@@ -22,34 +22,62 @@ storage_client = storage.Client()
 genai_client = genai.Client( vertexai=True, project=PROJECT_ID, location=LOCATION, ) 
 
 # ============================== # JSON SAFE PARSER # ============================== 
-def _parse_json_safe(raw_text): 
-    if not raw_text: 
-        raise Exception("Gemini returned empty response") 
-    raw_text = raw_text.strip() 
-    if raw_text.startswith(""):
-        raw_text = re.sub(r"^(?:json)?\s*", "", raw_text) 
-        raw_text = re.sub(r"\s*$", "", raw_text)
-        raw_text = raw_text.strip()
+def _parse_json_safe(raw_text):
+    if not raw_text:
+        raise Exception("Gemini returned empty response")
+
+    s = raw_text.strip()
+
+    # strip code fences kalau ada
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+        s = s.strip()
+
+    # 1) coba direct
     try:
-        return json.loads(raw_text)
+        return json.loads(s)
     except:
         pass
 
-    match_obj = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    if match_obj:
+    # 2) cari JSON pertama yang valid (handle prefix "Here is ...")
+    decoder = json.JSONDecoder()
+
+    # PRIORITAS: coba mulai dari '[' dulu (array)
+    idx_arr = s.find("[")
+    if idx_arr != -1:
         try:
-            return json.loads(match_obj.group())
+            obj, _ = decoder.raw_decode(s[idx_arr:])
+            return obj
         except:
             pass
 
-    match_arr = re.search(r"\[.*\]", raw_text, re.DOTALL)
+    # lalu coba mulai dari '{' (object)
+    idx_obj = s.find("{")
+    if idx_obj != -1:
+        try:
+            obj, _ = decoder.raw_decode(s[idx_obj:])
+            return obj
+        except:
+            pass
+
+    # 3) fallback regex: ARRAY dulu baru OBJECT
+    match_arr = re.search(r"\[.*\]", s, re.DOTALL)
     if match_arr:
         try:
             return json.loads(match_arr.group())
         except:
             pass
 
-    raise Exception(f"Gemini output bukan JSON valid:\n{raw_text[:1000]}")
+    match_obj = re.search(r"\{.*\}", s, re.DOTALL)
+    if match_obj:
+        try:
+            return json.loads(match_obj.group())
+        except:
+            pass
+
+    raise Exception(f"Gemini output bukan JSON valid:\n{s[:1000]}")
+
 
 # ==============================
 # MERGE PDF
@@ -458,6 +486,8 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
         print("========================================")
         
         json_array = _parse_json_safe(raw)
+        if isinstance(json_array, dict):
+            json_array = [json_array]
 
         print("========== PARSED TYPE ==========")
         print(type(json_array))
