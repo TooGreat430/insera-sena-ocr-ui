@@ -13,8 +13,6 @@ DOKUMEN WAJIB:
 1. Bill of Lading (sebagai referensi validasi)
 2. Invoice (sebagai referensi validasi)
 3. Packing List (sebagai referensi validasi)
-4. Purchase Order (sebagai referensi validasi)
-
 
 ABAIKAN:
 - Invoice line item
@@ -104,7 +102,6 @@ TOTAL OUTPUT SCHEMA
   "bl_package_unit": "string"
 }
 
-
 ============================================
 GENERAL KNOWLEDGE TOTAL
 ============================================
@@ -117,8 +114,6 @@ GENERAL KNOWLEDGE TOTAL
 6. LC Logic:
    -Jika Consignee terdapat nama perusahaan Bank, maka dokumen BL merupakan tipe LC
    -Jika Consignee tidak terdapat nama perusahaan Bank, maka dokumen BL bukan merupakan tipe LC
-
-
 
 ============================================
 VALIDASI TOTAL
@@ -153,7 +148,6 @@ VALIDASI TOTAL
 
 4. Validasi:
    - Packing List package count harus sama dengan invoice package count. Jika tidak sama → VALIDASI GAGAL.
-   - Purchase Order Price harus sama dengan Invoice Unit Price. Jika tidak sama → VALIDASI GAGAL.
    - Package Count BL HARUS sama dengan Total Package Count Packing List. Jika tidak sama → VALIDASI GAGAL.
    - Package Unit BL HARUS sama dengan Package Unit Packing List. Jika tidak sama → VALIDASI GAGAL.
    - Total Gross Weight BL HARUS sama dengan Total Gross Weight Packing List. Jika tidak sama → VALIDASI GAGAL.
