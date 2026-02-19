@@ -26,13 +26,14 @@ ATURAN UMUM EKSTRAKSI
 1. Ekstrak HANYA data yang benar-benar tertulis di dokumen.
 2. DILARANG mengarang.
 3. Semua angka HARUS numeric murni.
-4. Format tanggal: YYYY-MM-DD.
-5. Boolean dan null HARUS string:
+4. DILARANG menggunakan JSON literal null.
+5. Format tanggal: YYYY-MM-DD.
+6. Boolean dan null HARUS string:
    "true" | "false" | "null"
 
-6. Total line item pada dokumen adalah {total_row}.
-7. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
-8. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
+7. Total line item pada dokumen adalah {total_row}.
+8. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
+9. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
 
 ============================================
 OUTPUT
