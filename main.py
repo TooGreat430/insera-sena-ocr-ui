@@ -5,6 +5,7 @@ from google.cloud import storage
 from config import BUCKET_NAME, TMP_PREFIX
 import os
 import re
+from datetime import timezone, timedelta
 
 st.set_page_config(layout="wide")
 
@@ -151,7 +152,8 @@ if menu == "Report":
 
             with col3:
                 if f["updated"]:
-                    st.write(f["updated"].strftime("%Y-%m-%d %H:%M:%S"))
+                    wib_time = f["updated"].astimezone(timezone(timedelta(hours=7)))
+                    st.write(wib_time.strftime("%Y-%m-%d %H:%M:%S"))
                 else:
                     st.write("-")
 
