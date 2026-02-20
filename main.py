@@ -163,7 +163,7 @@ if menu == "Report":
                     st.download_button(
                         label="Download",
                         data=file_bytes,
-                        file_name=f["invoice"],
+                        file_name=f"{report_type}_{f['invoice']}",
                         mime="application/octet-stream"
                     )
 
