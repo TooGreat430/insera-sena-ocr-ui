@@ -278,6 +278,12 @@ def _get_po_json_uri():
 
 def _stream_filter_po_lines(target_po_numbers):
 
+    target_po_numbers = {
+        str(x).strip()
+        for x in (target_po_numbers or set())
+        if x is not None
+    }
+
     po_uri = _get_po_json_uri()
     parsed = urlparse(po_uri)
 
@@ -289,7 +295,10 @@ def _stream_filter_po_lines(target_po_numbers):
     with blob.open("rb") as f:
         for item in ijson.items(f, "item"):
             po_no = item.get("po_no")
-            if po_no in target_po_numbers:
+            if po_no is None:
+                continue
+
+            if str(po_no).strip() in target_po_numbers:
                 matched.append(item)
 
     return matched
@@ -303,6 +312,9 @@ def _map_po_to_details(po_lines, detail_rows):
     po_index = {}
     for line in po_lines:
         po_no = line.get("po_no")
+        if po_no is None:
+            continue
+        po_no = str(po_no).strip()
         po_index.setdefault(po_no, []).append(line)
 
     used_po_lines = set()
@@ -310,6 +322,7 @@ def _map_po_to_details(po_lines, detail_rows):
     for row in detail_rows:
 
         inv_po = row.get("inv_customer_po_no")
+        inv_po = str(inv_po).strip() if inv_po else None
         inv_article = (row.get("inv_spart_item_no") or "").strip()
         inv_desc = (row.get("inv_description") or "").strip()
 
@@ -454,12 +467,19 @@ def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
     total_obj.setdefault("match_score", "true")
     total_obj.setdefault("match_description", "null")
 
-    po_numbers = {p for p in po_numbers_from_detail if p}
+    po_numbers = {
+        str(p).strip()
+        for p in po_numbers_from_detail
+        if p is not None
+    }
     if not po_numbers:
         _append_total_error(total_obj, "PO number tidak ditemukan pada output detail")
         return total_data
 
-    lines = [l for l in po_lines if l.get("po_no") in po_numbers]
+    lines = [
+        l for l in po_lines
+        if str(l.get("po_no")).strip() in po_numbers
+    ]
     if not lines:
         _append_total_error(total_obj, "PO lines tidak ditemukan di master PO JSON")
         return total_data
@@ -633,6 +653,8 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
 
     po_lines = _stream_filter_po_lines(po_numbers)
+    print("PO NUMBERS:", po_numbers)
+    print("PO LINES FOUND:", len(po_lines))
 
     total_data = None
     container_data = None
