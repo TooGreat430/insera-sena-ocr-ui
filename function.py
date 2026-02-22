@@ -333,8 +333,9 @@ def _map_po_to_details(po_lines, detail_rows):
         if not po_no_norm:
             continue
 
-        v_norm = _norm_key(line.get("vendor_article_no"))
-        s_norm = _norm_key(line.get("sap_article_no"))
+        v_norm = _norm_key(line.get("vendor_article_no") or line.get("po_vendor_article_no"))
+        s_norm = _norm_key(line.get("sap_article_no") or line.get("po_sap_article_no"))
+
 
         if v_norm:
             po_index.setdefault((po_no_norm, v_norm), []).append((idx, line))
@@ -382,6 +383,13 @@ def _map_po_to_details(po_lines, detail_rows):
 # VALIDATE PO DATA
 # =========================================================
 
+def _to_num(x):
+    if x is None:
+        return None
+    try:
+        return float(str(x).strip().replace(",", ""))
+    except:
+        return None
 def _validate_po(detail_rows):
 
     for row in detail_rows:
@@ -393,8 +401,9 @@ def _validate_po(detail_rows):
 
         po_data = row.get("_po_data")
 
-        vendor_article = po_data.get("vendor_article_no")
-        sap_article = po_data.get("sap_article_no")
+        vendor_article = po_data.get("vendor_article_no") or po_data.get("po_vendor_article_no")
+        sap_article = po_data.get("sap_article_no") or po_data.get("po_sap_article_no")
+
 
         # FALLBACK VENDOR ARTICLE
         final_vendor_article = vendor_article or sap_article or "null"
@@ -411,23 +420,18 @@ def _validate_po(detail_rows):
 
         errors = []
 
-        inv_price = row.get("inv_unit_price")
-        po_price = po_data.get("po_price")
+        inv_price = _to_num(row.get("inv_unit_price"))
+        po_price = _to_num(po_data.get("po_price"))
 
-        inv_currency = row.get("inv_price_unit")
-        po_currency = po_data.get("po_currency")
+        inv_currency = str(row.get("inv_price_unit") or "").strip()
+        po_currency = str(po_data.get("po_currency") or "").strip()
 
-        # PRICE VALIDATION (DETAILED)
-        if inv_price != po_price:
-            errors.append(
-                f"po_price mismatch (inv: {inv_price}, po: {po_price})"
-            )
+        if inv_price is not None and po_price is not None and inv_price != po_price:
+            errors.append(f"po_price mismatch (inv: {inv_price}, po: {po_price})")
 
-        # CURRENCY VALIDATION (DETAILED)
-        if inv_currency != po_currency:
-            errors.append(
-                f"po_currency mismatch (inv: {inv_currency}, po: {po_currency})"
-            )
+        if inv_currency and po_currency and inv_currency != po_currency:
+            errors.append(f"po_currency mismatch (inv: {inv_currency}, po: {po_currency})")
+
 
         # APPLY ERRORS
         if errors:
