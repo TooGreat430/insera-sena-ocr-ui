@@ -307,63 +307,72 @@ def _stream_filter_po_lines(target_po_numbers):
 # PO MAPPING
 # ==============================
 
+def _norm_key(x):
+    if x is None:
+        return ""
+    s = str(x).strip().upper()
+    s = re.sub(r"\s+", "", s)          # hapus spasi
+    s = re.sub(r"[^A-Z0-9]", "", s)    # hapus dash, slash, dll
+    return s
+
 def _map_po_to_details(po_lines, detail_rows):
+    """
+    Join key:
+    - inv_customer_po_no  <-> po_no
+    - inv_spart_item_no   <-> vendor_article_no OR sap_article_no
 
+    Normalisasi hanya untuk matching.
+    Data yang dipakai untuk output tetap value asli (po_line asli).
+    """
+
+    # index: (po_no_norm, article_norm) -> list of (idx_in_po_lines, po_line_asli)
     po_index = {}
-    for line in po_lines:
-        po_no = line.get("po_no")
-        if po_no is None:
-            continue
-        po_no = str(po_no).strip()
-        po_index.setdefault(po_no, []).append(line)
 
-    used_po_lines = set()
+    for idx, line in enumerate(po_lines):
+        po_no_norm = _norm_key(line.get("po_no"))
+        if not po_no_norm:
+            continue
+
+        v_norm = _norm_key(line.get("vendor_article_no"))
+        s_norm = _norm_key(line.get("sap_article_no"))
+
+        if v_norm:
+            po_index.setdefault((po_no_norm, v_norm), []).append((idx, line))
+        if s_norm:
+            po_index.setdefault((po_no_norm, s_norm), []).append((idx, line))
+
+    used = set()  # (po_no_norm, idx_in_po_lines)
 
     for row in detail_rows:
+        if not isinstance(row, dict):
+            continue
 
-        inv_po = row.get("inv_customer_po_no")
-        inv_po = str(inv_po).strip() if inv_po else None
-        inv_article = (row.get("inv_spart_item_no") or "").strip()
-        inv_desc = (row.get("inv_description") or "").strip()
+        inv_po_raw = row.get("inv_customer_po_no")
+        inv_article_raw = row.get("inv_spart_item_no")
 
-        if inv_po not in po_index:
+        inv_po_norm = _norm_key(inv_po_raw)
+        inv_article_norm = _norm_key(inv_article_raw)
+
+        if not inv_po_norm or not inv_article_norm:
             row["_po_mapped"] = False
             continue
 
-        candidates = po_index[inv_po]
-
+        candidates = po_index.get((inv_po_norm, inv_article_norm), [])
         chosen = None
         chosen_key = None
 
-        for idx, po_line in enumerate(candidates):
-
-            if (inv_po, idx) in used_po_lines:
+        for idx, po_line in candidates:
+            key = (inv_po_norm, idx)
+            if key in used:
                 continue
-
-            vendor_article = (po_line.get("vendor_article_no") or "").strip()
-            sap_article = (po_line.get("sap_article_no") or "").strip()
-
-            # EXACT MATCH CONDITIONS
-            if inv_article and (
-                inv_article == vendor_article
-                or inv_article == sap_article
-            ):
-                chosen = po_line
-                chosen_key = (inv_po, idx)
-                break
-
-            if inv_desc and (
-                inv_desc == vendor_article
-                or inv_desc == sap_article
-            ):
-                chosen = po_line
-                chosen_key = (inv_po, idx)
-                break
+            chosen = po_line          # ✅ PO line ASLI
+            chosen_key = key
+            break
 
         if chosen:
-            used_po_lines.add(chosen_key)
+            used.add(chosen_key)
             row["_po_mapped"] = True
-            row["_po_data"] = chosen
+            row["_po_data"] = chosen  # ✅ simpan ASLI untuk dipakai _validate_po
         else:
             row["_po_mapped"] = False
 

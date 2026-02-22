@@ -182,6 +182,7 @@ GENERAL KNOWLEDGE DETAIL
    - Contoh:
      po_no = PO001 → inv_seq: 1,2,3
      po_no = PO002 → inv_seq: 1,2
+   -Jika inv_customer_po_no yang sama, maka LANJUTKAN NUMBERING inv_seq dari yang sebelumnya.
 
 6. inv_spart_item_no:
    - Jika tidak eksplisit → cek kolom ke-2 tabel item.
