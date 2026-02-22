@@ -86,7 +86,7 @@ if menu == "Report":
     )
 
     result_prefix = f"output/{report_type}/"
-    tmp_prefix = "tmp/result/"
+    tmp_prefix = f"{TMP_PREFIX}/"
 
     result_blobs = list(storage_client.list_blobs(BUCKET_NAME, prefix=result_prefix))
     tmp_blobs = list(storage_client.list_blobs(BUCKET_NAME, prefix=tmp_prefix))
@@ -117,7 +117,7 @@ if menu == "Report":
 
     for invoice in running_invoices:
         # check if already marked done
-        already_done = any(os.path.splitext(f["invoice"])[0] == invoice for f in files_data)
+        already_done = any(f["invoice"] == f"{invoice}_{report_type}.csv" for f in files_data)
 
         if not already_done:
             files_data.append({
@@ -165,7 +165,7 @@ if menu == "Report":
                     st.download_button(
                         label="Download",
                         data=file_bytes,
-                        file_name=f"{report_type}_{f['invoice']}",
+                        file_name=f["invoice"],
                         mime="application/octet-stream"
                     )
 

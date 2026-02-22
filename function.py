@@ -688,15 +688,21 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
     # ==============================
     # (NEW) OUTPUT PER FOLDER
     # ==============================
-    detail_csv_uri = _convert_to_csv_path(f"output/detail/{invoice_name}.csv", all_rows)
+    detail_csv_uri = _convert_to_csv_path(
+        f"output/detail/{invoice_name}_detail.csv", all_rows
+    )
 
     total_csv_uri = None
     if total_data is not None:
-        total_csv_uri = _convert_to_csv_path(f"output/total/{invoice_name}.csv", total_data)
+        total_csv_uri = _convert_to_csv_path(
+            f"output/total/{invoice_name}_total.csv", total_data
+        )
 
     container_csv_uri = None
     if container_data is not None:
-        container_csv_uri = _convert_to_csv_path(f"output/container/{invoice_name}.csv", container_data)
+        container_csv_uri = _convert_to_csv_path(
+            f"output/container/{invoice_name}_container.csv", container_data
+        )
 
 
     # CLEAN TEMP FILES
