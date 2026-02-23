@@ -207,6 +207,13 @@ GENERAL KNOWLEDGE DETAIL
 11. inv_coo_commodity_origin
    -SEBUTKAN NAMA NEGARANYA SAJA TIDAK PERLU TULISAN "Made In" yang penting nama negaranya
 
+12. coo_seq:
+   - coo_seq wajib numeric murni dan tidak boleh "null".
+   - coo_seq dihitung GLOBAL berdasarkan inv_customer_po_no yang sama untuk seluruh line item (index 1 sampai total_row), bukan dihitung ulang per batch.
+   - Definisi coo_seq per baris: coo_seq = hitung berapa kali inv_customer_po_no yang sama sudah muncul dari index 1 sampai index baris ini (termasuk baris ini).
+   Contoh: PO=112 muncul di index 2,5,6 → coo_seq untuk index 2=1, index 5=2, index 6=3.
+   - Untuk baris yang kamu keluarkan (index {first_index}..{last_index}), coo_seq tetap harus mengikuti hitungan global dari index 1..total_row.
+
 ============================================
 VALIDASI OUTPUT SCHEMA
 ============================================
