@@ -204,6 +204,9 @@ GENERAL KNOWLEDGE DETAIL
    - Jika bl_consignee_name mengandung nama perusahaan Bank → BL bertipe LC.
    - Jika tidak → BL bukan bertipe LC.
 
+11. inv_coo_commodity_origin
+   -SEBUTKAN NAMA NEGARANYA SAJA TIDAK PERLU TULISAN "Made In" yang penting nama negaranya
+
 ============================================
 VALIDASI OUTPUT SCHEMA
 ============================================
