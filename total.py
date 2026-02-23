@@ -114,6 +114,12 @@ GENERAL KNOWLEDGE TOTAL
 6. LC Logic:
    -Jika Consignee terdapat nama perusahaan Bank, maka dokumen BL merupakan tipe LC
    -Jika Consignee tidak terdapat nama perusahaan Bank, maka dokumen BL bukan merupakan tipe LC
+7. Package unit
+   -Jika unit barang karton/carton --> Ubah menjadi CT
+   -Jika unit barang pallet --> Ubah menjadi PX
+   -Jika unit barang campuran --> Ubah menjadi PK
+   -Jika unit barang Bal --> Ubah menjadi BL
+   -Jika selain dari 4 requirement diatas --> it is what it is
 
 ============================================
 VALIDASI TOTAL

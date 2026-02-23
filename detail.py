@@ -177,12 +177,11 @@ GENERAL KNOWLEDGE DETAIL
    - Jika terdapat PT Insera Sena dan pihak lain → pilih yang BUKAN PT Insera Sena.
 
 5. inv_seq:
-   - Jika "null" → isi nomor urut baris otomatis.
-   - Penomoran inv_seq DIMULAI ULANG dari 1 SETIAP kali ditemukan inv_customer_po_no yang BERBEDA.
-   - Contoh:
-     po_no = PO001 → inv_seq: 1,2,3
-     po_no = PO002 → inv_seq: 1,2
-   -Jika inv_customer_po_no yang sama, maka LANJUTKAN NUMBERING inv_seq dari yang sebelumnya.
+   - inv_seq wajib numeric murni dan tidak boleh "null".
+   - inv_seq dihitung GLOBAL berdasarkan inv_customer_po_no yang sama untuk seluruh line item (index 1 sampai total_row), bukan dihitung ulang per batch.
+   - Definisi inv_seq per baris: inv_seq = hitung berapa kali inv_customer_po_no yang sama sudah muncul dari index 1 sampai index baris ini (termasuk baris ini).
+   Contoh: PO=112 muncul di index 2,5,6 → inv_seq untuk index 2=1, index 5=2, index 6=3.
+   - Untuk baris yang kamu keluarkan (index {first_index}..{last_index}), inv_seq tetap harus mengikuti hitungan global dari index 1..total_row.
 
 6. inv_spart_item_no:
    - Jika tidak eksplisit → cek kolom ke-2 tabel item.
