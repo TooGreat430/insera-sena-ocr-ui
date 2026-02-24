@@ -24,20 +24,28 @@ ATURAN UMUM EKSTRAKSI
 ============================================
 
 1. Ekstrak HANYA data yang benar-benar tertulis di dokumen.
-2. DILARANG mengarang.
-3. Semua angka HARUS numeric murni.
+2. DILARANG mengarang, menebak, atau mengisi berdasarkan asumsi.
+3. Jika field tidak ditemukan → WAJIB diisi dengan STRING "null".
 4. DILARANG menggunakan JSON literal null.
-5. Format tanggal: YYYY-MM-DD.
-6. Boolean dan null HARUS string:
-   "true" | "false" | "null"
+5. Semua angka HARUS numeric murni.
+6. Unit HARUS sama persis seperti di dokumen.
+7. Format tanggal: YYYY-MM-DD.
+8. SELURUH nilai boolean dan null HARUS berupa STRING:
+   - "true"
+   - "false"
+   - "null"
+9. Jika dokumen Bill of Lading (BL) TIDAK TERSEDIA:
+- field bl_* WAJIB diisi dengan STRING "null".
+10. Jika dokumen Certificate of Origin (COO) TIDAK TERSEDIA:
+- field coo_* WAJIB diisi dengan STRING "null".
+- coo_seq TIDAK BOLEH dihitung jika dokumen COO tidak tersedia.
 
-7. Total line item pada dokumen adalah {total_row}.
-8. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
-9. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
-10. Jika dokumen Bill of Lading (BL) atau Certificate of Origin (COO) TIDAK TERSEDIA:
-- Seluruh field bl_* atau coo_* WAJIB diisi dengan string "null".
+11. Total line item pada dokumen adalah {total_row}.
+12. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
+13. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
+
 ============================================
-OUTPUT
+DETAIL OUTPUT SCHEMA
 ============================================
 
 - Output HANYA JSON ARRAY
