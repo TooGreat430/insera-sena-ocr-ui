@@ -273,13 +273,24 @@ def _get_po_json_uri():
     return f"gs://{BUCKET_NAME}/{po_blob.name}"
 
 # ==============================
+# Nomalize PO NO
+# ==============================
+
+def _norm_po_number(x):
+    if x is None:
+        return ""
+    s = str(x).strip()
+    s = re.sub(r"\D", "", s)  # ambil angka saja
+    return s.lstrip("0")      # buang leading zero untuk compare
+
+# ==============================
 # FILTER PO JSON
 # ==============================
 
 def _stream_filter_po_lines(target_po_numbers):
 
     target_po_numbers = {
-        str(x).strip()
+        _norm_po_number(x)
         for x in (target_po_numbers or set())
         if x is not None
     }
@@ -298,7 +309,7 @@ def _stream_filter_po_lines(target_po_numbers):
             if po_no is None:
                 continue
 
-            if str(po_no).strip() in target_po_numbers:
+            if _norm_po_number(po_no) in target_po_numbers:
                 matched.append(item)
 
     return matched
@@ -329,7 +340,7 @@ def _map_po_to_details(po_lines, detail_rows):
     po_index = {}
 
     for idx, line in enumerate(po_lines):
-        po_no_norm = _norm_key(line.get("po_no"))
+        po_no_norm = _norm_po_number(line.get("po_no"))
         if not po_no_norm:
             continue
 
@@ -351,7 +362,7 @@ def _map_po_to_details(po_lines, detail_rows):
         inv_po_raw = row.get("inv_customer_po_no")
         inv_article_raw = row.get("inv_spart_item_no")
 
-        inv_po_norm = _norm_key(inv_po_raw)
+        inv_po_norm = _norm_po_number(inv_po_raw)
         inv_article_norm = _norm_key(inv_article_raw)
 
         if not inv_po_norm or not inv_article_norm:
@@ -483,7 +494,7 @@ def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
     total_obj.setdefault("match_description", "null")
 
     po_numbers = {
-        str(p).strip()
+        _norm_po_number(p)
         for p in po_numbers_from_detail
         if p is not None
     }
@@ -493,7 +504,7 @@ def _map_po_to_total(total_data, po_lines, po_numbers_from_detail):
 
     lines = [
         l for l in po_lines
-        if str(l.get("po_no")).strip() in po_numbers
+        if _norm_po_number(l.get("po_no")) in po_numbers
     ]
     if not lines:
         _append_total_error(total_obj, "PO lines tidak ditemukan di master PO JSON")
