@@ -203,14 +203,23 @@ GENERAL KNOWLEDGE DETAIL
    - Jika barang Bal → BL
    - Selain itu → gunakan nilai asli.
 
-10. LC Logic pada Bill of Lading (BL):
+10. Jika pl_volume bernilai "null" atau tidak tertulis secara eksplisit,
+    namun terdapat informasi dimensi seperti "Size: LxWxH" atau format serupa pada dokumen Packing list,
+    maka:
+    - Ekstrak ketiga nilai dimensi.
+    - Jika satuan CM → konversi ke meter.
+    - Hitung volume = panjang × lebar × tinggi.
+    - Isi pl_volume dengan hasil numeric murni.
+    - Isi pl_volume_unit dengan "M3".
+
+11. LC Logic pada Bill of Lading (BL):
    - Jika bl_consignee_name mengandung nama perusahaan Bank → BL bertipe LC.
    - Jika tidak → BL bukan bertipe LC.
 
-11. inv_coo_commodity_origin
+12. inv_coo_commodity_origin
    -SEBUTKAN NAMA NEGARANYA SAJA TIDAK PERLU TULISAN "Made In" yang penting nama negaranya
 
-12. coo_seq:
+13. coo_seq:
    - coo_seq wajib numeric murni dan tidak boleh "null".
    - coo_seq dihitung GLOBAL berdasarkan inv_customer_po_no yang sama untuk seluruh line item (index 1 sampai total_row), bukan dihitung ulang per batch.
    - Definisi coo_seq per baris: coo_seq = hitung berapa kali inv_customer_po_no yang sama sudah muncul dari index 1 sampai index baris ini (termasuk baris ini).
