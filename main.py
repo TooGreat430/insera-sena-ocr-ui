@@ -51,9 +51,6 @@ if menu == "Upload":
         if not invoice or not packing:
             st.warning("Invoice dan Packing List wajib diupload")
 
-        elif (bl and not coo) or (coo and not bl):
-            st.warning("BL dan COO harus diupload bersamaan")
-
         else:
             pdf_paths = []
 
