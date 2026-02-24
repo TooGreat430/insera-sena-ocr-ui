@@ -204,12 +204,10 @@ GENERAL KNOWLEDGE DETAIL
    - Selain itu → gunakan nilai asli.
 
 10. Jika pl_volume bernilai "null" atau tidak tertulis secara eksplisit,
-    namun terdapat informasi dimensi seperti "Size: LxWxH" atau format serupa pada dokumen Packing list,
+    namun terdapat informasi dimensi seperti "Size: LxWxH" atau format serupa pada dokumen Packing List,
     maka:
-    - Ekstrak ketiga nilai dimensi.
-    - Jika satuan CM → konversi ke meter.
-    - Hitung volume = panjang × lebar × tinggi.
-    - Isi pl_volume dengan hasil numeric murni.
+    - Ekstrak ketiga nilai dimensi beserta satuannya dan konversikan ke meter jika diperlukan.
+    - Hitung volume = panjang × lebar × tinggi (dalam meter), hasilnya menjadi value untuk pl_volume dalam bentuk numeric murni.
     - Isi pl_volume_unit dengan "M3".
 
 11. LC Logic pada Bill of Lading (BL):
