@@ -25,18 +25,17 @@ ATURAN UMUM EKSTRAKSI
 
 1. Ekstrak HANYA data yang benar-benar tertulis di dokumen.
 2. DILARANG mengarang.
-3. Jika field tidak ditemukan → WAJIB diisi dengan string "null".
-4. Semua angka HARUS numeric murni.
-5. DILARANG menggunakan JSON literal null.
-6. Format tanggal: YYYY-MM-DD.
-7. Boolean dan null HARUS string:
+3. Semua angka HARUS numeric murni.
+4. DILARANG menggunakan JSON literal null.
+5. Format tanggal: YYYY-MM-DD.
+6. Boolean dan null HARUS string:
    "true" | "false" | "null"
 
-8. Total line item pada dokumen adalah {total_row}.
-9. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
-10. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
-10. Jika suatu dokumen tidak tersedia, semua field dokumen tersebut WAJIB diisi dengan string "null". 
-
+7. Total line item pada dokumen adalah {total_row}.
+8. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
+9. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
+10. Jika dokumen Bill of Lading (BL) atau Certificate of Origin (COO) TIDAK TERSEDIA:
+- Seluruh field bl_* atau coo_* WAJIB diisi dengan string "null".
 ============================================
 OUTPUT
 ============================================
