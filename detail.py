@@ -34,6 +34,9 @@ ATURAN UMUM EKSTRAKSI
 7. Total line item pada dokumen adalah {total_row}.
 8. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
 9. Walaupun output dibatasi index, SEMUA validasi total WAJIB dihitung dari SELURUH dokumen.
+10. Jika dokumen Bill of Lading (BL) atau Certificate of Origin (COO) TIDAK TERSEDIA:
+- Seluruh field bl_* dan coo_* WAJIB diisi dengan string "null".
+- coo_seq TIDAK BOLEH dihitung jika dokumen COO tidak tersedia.
 
 ============================================
 OUTPUT
