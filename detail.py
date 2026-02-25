@@ -244,7 +244,7 @@ I. VALIDASI INVOICE
 1. Validasi penjumlahan data total:
    - Jika pada dokumen Invoice terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package, Maka jumlahkan semua value net weight, gross weight, volume, amount, quantity, package apakah sama dengan value totalnya. Jika tidak sama → VALIDASI GAGAL.
 
-2. Field wajib (TIDAK BOLEH "null"):
+2. Field wajib (TIDAK BOLEH "null") JIKA ADA YANG NULL LANGSUNG RETURN FALSE:
    - inv_invoice_no
    - inv_invoice_date
    - inv_customer_po_no
@@ -283,7 +283,7 @@ II.VALIDASI PACKING LIST (PL)
 3. Mapping:
    - Setiap invoice line item dipetakan ke packing list line item.
 
-4. Field wajib (tidak boleh "null"):
+4. Field wajib (tidak boleh "null") JIKA ADA YANG NULL LANGSUNG RETURN FALSE:
    - pl_invoice_no
    - pl_invoice_date
    - pl_messrs
@@ -318,7 +318,7 @@ III. VALIDASI BILL OF LADING (BL)
      - bl_consignee_address diambil dari notify party
      - bl_consignee_name diambil dari notify party
 
-3. Field wajib JIKA dokumen Bill of Lading TERSEDIA (tidak boleh "null"):
+3. Field wajib JIKA dokumen Bill of Lading TERSEDIA (tidak boleh "null") JIKA ADA YANG NULL LANGSUNG RETURN FALSE:
    - bl_shipper_name
    - bl_shipper_address
    - bl_no
@@ -344,7 +344,7 @@ JIKA SALAH SATU DARI VALIDASI INI ADA YANG SALAH, MAKA LANGSUNG RETURN FALSE
 IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
 ============================================
 
-1. Field wajib JIKA dokumen Certificate of Origin TERSEDIA (tidak boleh "null"):
+1. Field wajib JIKA dokumen Certificate of Origin TERSEDIA (tidak boleh "null") JIKA ADA YANG NULL LANGSUNG RETURN FALSE:
    - coo_no
    - coo_form_type
    - coo_invoice_no
@@ -427,6 +427,7 @@ OUTPUT RESTRICTION
 ============================================
 
 - Output HANYA JSON ARRAY.
+- JIKA TIDAK YAKIN, JANGAN DIPAKSAKAN UNTUK DIISI. ISI SAJA NULL
 - DILARANG:
   - Markdown
   - Penjelasan tambahan
