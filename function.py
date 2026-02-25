@@ -162,7 +162,7 @@ def _call_gemini(pdf_path, prompt, invoice_name):
                 )
             ],
             config=types.GenerateContentConfig(
-                temperature=0,
+                temperature=0.2,
                 top_p=1,
                 max_output_tokens=65535,
             ),
