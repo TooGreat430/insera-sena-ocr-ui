@@ -39,6 +39,20 @@ ATURAN UMUM EKSTRAKSI
 - coo_seq TIDAK BOLEH dihitung jika dokumen COO tidak tersedia.
 
 ============================================
+ISOLASI SUMBER DATA PER DOKUMEN
+============================================
+
+1. Field dengan prefix "inv_*" HANYA boleh diambil dari dokumen Invoice.
+2. Field dengan prefix "pl_*" HANYA boleh diambil dari dokumen Packing List.
+3. Field dengan prefix "bl_*" HANYA boleh diambil dari dokumen Bill of Lading.
+4. Field dengan prefix "coo_*" HANYA boleh diambil dari dokumen Certificate of Origin.
+
+DILARANG menggunakan data dari dokumen lain untuk mengisi field yang bukan miliknya.
+
+Jika suatu field tidak tertulis pada dokumen yang sesuai:
+WAJIB diisi string "null".
+
+============================================
 OUTPUT
 ============================================
 
@@ -350,26 +364,33 @@ IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
      - kemiripan antara coo_description dan inv_description.
    - Jika tidak ditemukan invoice line yang sesuai → VALIDASI GAGAL.
 
-CATATAN EKSEKUSI VALIDASI: 
-- Seluruh aturan Validasi Bill of Lading (IV) HANYA dijalankan JIKA dokumen Bill of Lading TERSEDIA. 
-- Seluruh aturan Validasi COO (V) HANYA dijalankan JIKA dokumen Certificate of Origin TERSEDIA.
-- Jika dokumen tidak tersedia, section validasi tersebut HARUS DI-SKIP sepenuhnya.
-
 ============================================
-LOGIKA MATCH SCORE
+ATURAN EKSEKUSI VALIDASI
 ============================================
 
-1. match_score = "true"
-   - Jika SELURUH validasi LOLOS.
+1. Validasi BL HANYA dijalankan jika dokumen BL tersedia.
+2. Validasi COO HANYA dijalankan jika dokumen COO tersedia.
+3. Jika dokumen tidak tersedia:
+   - Seluruh field prefix dokumen tersebut WAJIB "null".
+   - Seluruh validasi section tersebut WAJIB DI-SKIP.
+   - Section tersebut TIDAK BOLEH mempengaruhi match_score.
 
-2. match_score = "false"
-   - Jika ADA SATU validasi GAGAL.
+============================================
+ATURAN PENENTUAN MATCH SCORE
+============================================
 
-Catatan match_score:
-- Jika BL/COO TIDAK TERSEDIA:
-  match_score ditentukan HANYA dari validasi Invoice dan Packing List.
-- Jika BL/COO TERSEDIA:
-  match_score ditentukan dari seluruh validasi dokumen yang tersedia.
+1. HANYA validasi dari dokumen yang TERSEDIA yang diperhitungkan.
+
+2. Dokumen yang TIDAK TERSEDIA:
+   - Tidak divalidasi.
+   - Tidak dihitung sebagai gagal.
+   - Tidak mempengaruhi match_score.
+
+3. Jika terdapat minimal satu validasi dari dokumen yang TERSEDIA bernilai false:
+   match_score = "false".
+
+4. Jika seluruh validasi dari dokumen yang TERSEDIA bernilai true:
+   match_score = "true".
 
 ============================================
 MATCH DESCRIPTION
