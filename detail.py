@@ -235,7 +235,11 @@ GENERAL KNOWLEDGE DETAIL
 VALIDASI OUTPUT SCHEMA
 ============================================
 
+Pada bagian ini,  PERIKSALAH LAH DENGAN TELITI AGAR VALIDASI INI BENAR.
+
+============================================
 I. VALIDASI INVOICE
+============================================
 
 1. Validasi penjumlahan data total:
    - Jika pada dokumen Invoice terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package, Maka jumlahkan semua value net weight, gross weight, volume, amount, quantity, package apakah sama dengan value totalnya. Jika tidak sama → VALIDASI GAGAL.
@@ -261,7 +265,11 @@ I. VALIDASI INVOICE
 4. Validasi aritmatika:
    - Invoice amount HARUS sama dengan invoice quantity dikali invoice unit price.  Jika tidak sama → VALIDASI GAGAL.
 
+JIKA SALAH SATU DARI VALIDASI INI ADA YANG SALAH, MAKA LANGSUNG RETURN FALSE
+
+============================================
 II.VALIDASI PACKING LIST (PL)
+============================================
 
 1. Validasi kesesuaian terhadap Invoice:
    - pl_invoice_no HARUS sama dengan inv_invoice_no. Jika tidak sama → VALIDASI GAGAL.
@@ -294,7 +302,11 @@ II.VALIDASI PACKING LIST (PL)
 5. Validasi data total berbentuk huruf:
    Jika pada dokumen Packing List terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package yang berbetuk huruf, Maka ekstrak atau convert nilai angka dari huruf tersebut dan lakukan validasi hasil ekstraksi.
 
+JIKA SALAH SATU DARI VALIDASI INI ADA YANG SALAH, MAKA LANGSUNG RETURN FALSE
+
+============================================
 III. VALIDASI BILL OF LADING (BL)
+============================================
 
 1. Seller fallback:
    - Jika bl_seller_name atau bl_seller_address tidak ada atau "null":
@@ -326,7 +338,11 @@ III. VALIDASI BILL OF LADING (BL)
 5. Validasi kesesuaian dengan invoice:
    - bl_seller_name HARUS sama dengan inv_vendor_name. Jika tidak sama → VALIDASI GAGAL.
 
+JIKA SALAH SATU DARI VALIDASI INI ADA YANG SALAH, MAKA LANGSUNG RETURN FALSE
+
+============================================
 IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
+============================================
 
 1. Field wajib JIKA dokumen Certificate of Origin TERSEDIA (tidak boleh "null"):
    - coo_no
