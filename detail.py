@@ -224,10 +224,8 @@ GENERAL KNOWLEDGE DETAIL
    - Untuk baris yang kamu keluarkan (index {first_index}..{last_index}), coo_seq tetap harus mengikuti hitungan global dari index 1..total_row.
 
 ============================================
-VALIDASI OUTPUT SCHEMA
+VALIDASI INVOICE
 ============================================
-
-I. VALIDASI INVOICE
 
 1. Validasi penjumlahan data total:
    - Jika pada dokumen Invoice terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package, Maka jumlahkan semua value net weight, gross weight, volume, amount, quantity, package apakah sama dengan value totalnya. Jika tidak sama → VALIDASI GAGAL.
@@ -253,7 +251,9 @@ I. VALIDASI INVOICE
 4. Validasi aritmatika:
    - Invoice amount HARUS sama dengan invoice quantity dikali invoice unit price.  Jika tidak sama → VALIDASI GAGAL.
 
-II.VALIDASI PACKING LIST (PL)
+============================================
+VALIDASI PACKING LIST (PL)
+============================================
 
 1. Validasi kesesuaian terhadap Invoice:
    - pl_invoice_no HARUS sama dengan inv_invoice_no. Jika tidak sama → VALIDASI GAGAL.
@@ -286,7 +286,9 @@ II.VALIDASI PACKING LIST (PL)
 5. Validasi data total berbentuk huruf:
    Jika pada dokumen Packing List terdapat Value total seperti total net weight, gross weight, volume, amount, quantity, package yang berbetuk huruf, Maka ekstrak atau convert nilai angka dari huruf tersebut dan lakukan validasi hasil ekstraksi.
 
-III. VALIDASI BILL OF LADING (BL)
+============================================
+VALIDASI BILL OF LADING (BL)
+============================================
 
 1. Seller fallback:
    - Jika bl_seller_name atau bl_seller_address tidak ada atau "null":
@@ -318,7 +320,9 @@ III. VALIDASI BILL OF LADING (BL)
 5. Validasi kesesuaian dengan invoice:
    - bl_seller_name HARUS sama dengan inv_vendor_name. Jika tidak sama → VALIDASI GAGAL.
 
-IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
+============================================
+VALIDASI CERTIFICATE OF ORIGIN (COO)
+============================================
 
 1. Field wajib JIKA dokumen Certificate of Origin TERSEDIA (tidak boleh "null"):
    - coo_no
@@ -356,26 +360,29 @@ IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
      - kemiripan antara coo_description dan inv_description.
    - Jika tidak ditemukan invoice line yang sesuai → VALIDASI GAGAL.
 
-CATATAN EKSEKUSI VALIDASI: 
-- Seluruh aturan Validasi Bill of Lading (IV) HANYA dijalankan JIKA dokumen Bill of Lading TERSEDIA. 
-- Seluruh aturan Validasi COO (V) HANYA dijalankan JIKA dokumen Certificate of Origin TERSEDIA.
-- Jika dokumen tidak tersedia, section validasi tersebut HARUS DI-SKIP sepenuhnya.
+============================================
+ATURAN EKSEKUSI VALIDASI
+============================================
+1. Validasi Bill of Lading dijalankan HANYA jika dokumen tersedia.
+2. Validasi Certificate of Origin dijalankan HANYA jika dokumen tersedia.
+3. Untuk dokumen yang tidak tersedia:
+   - Ekstraksi TIDAK dilakukan.
+   - Validasi TIDAK dilakukan.
+   - Seluruh field diisi "null".
 
 ============================================
-LOGIKA MATCH SCORE
+ATURAN PENENTUAN MATCH SCORE
 ============================================
 
-1. match_score = "true"
-   - Jika SELURUH validasi LOLOS.
+1. match_score ditentukan HANYA berdasarkan hasil validasi dari dokumen yang TERSEDIA.
 
-2. match_score = "false"
-   - Jika ADA SATU validasi GAGAL.
+2. Untuk dokumen yang TIDAK TERSEDIA, validasi dokumen tersebut TIDAK MEMPENGARUHI match_score. 
 
-Catatan match_score:
-- Jika BL/COO TIDAK TERSEDIA:
-  match_score ditentukan HANYA dari validasi Invoice dan Packing List.
-- Jika BL/COO TERSEDIA:
-  match_score ditentukan dari seluruh validasi dokumen yang tersedia.
+3. Jika terdapat minimal satu validasi gagal dari dokumen yang TERSEDIA:
+   match_score = "false".
+
+4. Jika seluruh validasi dari dokumen yang TERSEDIA lolos:
+   match_score = "true".
 
 ============================================
 MATCH DESCRIPTION
