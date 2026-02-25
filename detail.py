@@ -380,6 +380,8 @@ IV. VALIDASI CERTIFICATE OF ORIGIN (COO)
      - kemiripan antara coo_description dan inv_description.
    - Jika tidak ditemukan invoice line yang sesuai → VALIDASI GAGAL.
 
+JIKA SALAH SATU DARI VALIDASI INI ADA YANG SALAH, MAKA LANGSUNG RETURN FALSE
+
 ============================================
 ATURAN EKSEKUSI VALIDASI
 ============================================
