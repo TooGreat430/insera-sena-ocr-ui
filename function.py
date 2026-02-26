@@ -248,8 +248,395 @@ def _merge_all_batches(invoice_name):
     return all_rows
 
 # ==============================
-# GET PO JSON URI (DIRECT FROM GCS)
+# FILL INV SEQ (aman)
 # ==============================
+
+def _fill_inv_seq(detail_rows):
+    """
+    Mengisi field inv_seq berdasarkan jumlah kemunculan
+    inv_customer_po_no pada seluruh detail_rows.
+
+    - Untuk setiap inv_customer_po_no baru → inv_seq = 1
+    - Jika sudah pernah muncul → increment
+    - Jika inv_customer_po_no null/kosong → inv_seq = "null"
+    """
+
+    counter = {}
+
+    for row in detail_rows:
+
+        if not isinstance(row, dict):
+            continue
+
+        po_no = row.get("inv_customer_po_no")
+
+        # jika PO null → seq juga null
+        if po_no in (None, "", "null"):
+            row["inv_seq"] = "null"
+            continue
+
+        # normalisasi sederhana (trim)
+        po_no = str(po_no).strip()
+
+        # hitung counter
+        if po_no not in counter:
+            counter[po_no] = 1
+        else:
+            counter[po_no] += 1
+
+        row["inv_seq"] = counter[po_no]
+
+    return detail_rows
+
+# ==============================
+# HELPER VALIDATION (aman)
+# ==============================
+
+def _init_match_fields(detail_rows):
+    for row in detail_rows:
+        row["match_score"] = "true"
+        row["match_description"] = "null"
+    return detail_rows
+
+
+def _add_error(row, message):
+    row["match_score"] = "false"
+
+    if row.get("match_description") in (None, "", "null"):
+        row["match_description"] = message
+    else:
+        row["match_description"] += "; " + message
+
+
+def _to_float(x):
+    try:
+        return float(str(x).replace(",", "").strip())
+    except:
+        return None
+
+# ==============================
+# INVOICE VALIDATION 
+# ==============================
+
+def _validate_invoice(detail_rows): #aman
+
+    mandatory_fields = [
+        "inv_invoice_no",
+        "inv_invoice_date",
+        "inv_customer_po_no",
+        "inv_vendor_name",
+        "inv_vendor_address",
+        "inv_spart_item_no",
+        "inv_description",
+        "inv_quantity",
+        "inv_quantity_unit",
+        "inv_unit_price",
+        "inv_price_unit",
+        "inv_amount",
+        "inv_amount_unit",
+    ]
+
+    for row in detail_rows:
+
+        for f in mandatory_fields:
+            if row.get(f) in (None, "", "null"):
+                _add_error(row, f"{f} tidak boleh null")
+
+        qty = _to_float(row.get("inv_quantity"))
+        price = _to_float(row.get("inv_unit_price"))
+        amount = _to_float(row.get("inv_amount"))
+
+        if qty is not None and price is not None and amount is not None:
+            calc = round(qty * price, 2)
+            if round(amount, 2) != calc:
+                _add_error(
+                    row,
+                    f"inv_amount ({amount}) tidak sesuai dengan perhitungan ({qty} x {price} = {calc})"
+                )
+
+    return detail_rows
+
+def _validate_invoice_totals(detail_rows): #stengah aman
+
+    invoice_total_map = {
+        "inv_total_quantity": "inv_quantity",
+        "inv_total_amount": "inv_amount",
+    }
+
+    cross_doc_total_map = {
+        "inv_total_nw": "pl_nw",
+        "inv_total_gw": "pl_gw",
+        "inv_total_volume": "pl_volume",
+        "inv_total_package": "pl_package_count",
+    }
+
+    # HITUNG TOTAL INTERNAL INVOICE
+    calculated = {}
+
+    for total_field, detail_field in invoice_total_map.items():
+        total = 0.0
+        for row in detail_rows:
+            val = _to_float(row.get(detail_field))
+            if val is not None:
+                total += val
+        calculated[total_field] = round(total, 2)
+
+    # HITUNG TOTAL CROSS DOC (PL)
+    pl_available = any(
+        row.get("pl_invoice_no") not in (None, "", "null")
+        for row in detail_rows
+    )
+
+    if pl_available:
+        for total_field, detail_field in cross_doc_total_map.items():
+            total = 0.0
+            for row in detail_rows:
+                val = _to_float(row.get(detail_field))
+                if val is not None:
+                    total += val
+            calculated[total_field] = round(total, 2)
+
+    # VALIDASI PER LINE
+    for row in detail_rows:
+
+        for total_field, calc_value in calculated.items():
+
+            extracted = _to_float(row.get(total_field))
+            if extracted is None:
+                continue
+
+            if round(extracted, 2) != calc_value:
+                _add_error(
+                    row,
+                    f"{total_field} ({extracted}) tidak sesuai dengan total hasil perhitungan ({calc_value})"
+                )
+
+    return detail_rows
+
+# ==============================
+# PACKING LIST VALIDATION (aman)
+# ==============================
+
+def _validate_pl(detail_rows): #aman
+
+    mandatory = [
+        "pl_invoice_no",
+        "pl_invoice_date",
+        "pl_messrs",
+        "pl_messrs_address",
+        "pl_item_no",
+        "pl_description",
+        "pl_quantity",
+        "pl_package_unit",
+        "pl_package_count",
+        "pl_weight_unit",
+        "pl_nw",
+        "pl_gw",
+        "pl_volume_unit",
+        "pl_volume",
+    ]
+
+    for row in detail_rows:
+
+        for f in mandatory:
+            if row.get(f) in (None, "", "null"):
+                _add_error(row, f"{f} tidak boleh null")
+
+        if row.get("pl_invoice_no") != row.get("inv_invoice_no"):
+            _add_error(row, "pl_invoice_no tidak sama dengan inv_invoice_no")
+
+        if row.get("pl_invoice_date") != row.get("inv_invoice_date"):
+            _add_error(row, "pl_invoice_date tidak sama dengan inv_invoice_date")
+
+        if row.get("pl_messrs") != row.get("inv_messrs"):
+            _add_error(row, "pl_messrs tidak sama dengan inv_messrs")
+
+        if row.get("pl_messrs_address") != row.get("inv_messrs_address"):
+            _add_error(row, "pl_messrs_address tidak sama dengan inv_messrs_address")
+
+    return detail_rows
+
+def _validate_pl_totals(detail_rows):
+
+    total_map = {
+        "pl_total_quantity": "pl_quantity",
+        "pl_total_amount": "pl_amount",
+        "pl_total_nw": "pl_nw",
+        "pl_total_gw": "pl_gw",
+        "pl_total_volume": "pl_volume",
+        "pl_total_package": "pl_package_count",
+    }
+
+    calculated = {}
+
+    for total_field, detail_field in total_map.items():
+        total = 0.0
+        for row in detail_rows:
+            val = _to_float(row.get(detail_field))
+            if val is not None:
+                total += val
+        calculated[total_field] = round(total, 2)
+
+    for row in detail_rows:
+        for total_field in total_map.keys():
+            extracted = _to_float(row.get(total_field))
+            if extracted is None:
+                continue
+
+            if round(extracted, 2) != calculated[total_field]:
+                _add_error(
+                    row,
+                    f"{total_field} ({extracted}) tidak sesuai dengan total hasil perhitungan ({calculated[total_field]})"
+                )
+
+    return detail_rows
+
+# ==============================
+# BILL OF LADING VALIDATION (aman)
+# ==============================
+def _validate_bl(detail_rows):
+
+    for row in detail_rows:
+
+        if row.get("bl_no") in (None, "", "null"):
+            continue
+
+        if row.get("bl_seller_name") in (None, "", "null"):
+            row["bl_seller_name"] = row.get("bl_shipper_name")
+
+        if row.get("bl_seller_address") in (None, "", "null"):
+            row["bl_seller_address"] = row.get("bl_shipper_address")
+
+        mandatory = [
+            "bl_shipper_name",
+            "bl_shipper_address",
+            "bl_no",
+            "bl_date",
+            "bl_consignee_name",
+            "bl_consignee_address",
+            "bl_vessel",
+            "bl_voyage_no",
+            "bl_port_of_loading",
+            "bl_port_of_destination",
+        ]
+
+        for f in mandatory:
+            if row.get(f) in (None, "", "null"):
+                _add_error(row, f"{f} tidak boleh null (BL tersedia)")
+
+        if str(row.get("bl_seller_name","")).strip().lower() != \
+            str(row.get("inv_vendor_name","")).strip().lower():
+            _add_error(row, "bl_seller_name tidak sama dengan inv_vendor_name")
+
+    return detail_rows
+
+# ==============================
+# COO VALIDATION
+# ==============================
+
+def _validate_coo(detail_rows):
+
+    for row in detail_rows:
+
+        if row.get("coo_no") in (None, "", "null"):
+            continue
+        
+        # FIELD WAJIB
+        mandatory = [
+            "coo_no",
+            "coo_form_type",
+            "coo_invoice_no",
+            "coo_invoice_date",
+            "coo_shipper_name",
+            "coo_shipper_address",
+            "coo_consignee_name",
+            "coo_consignee_address",
+            "coo_seq",
+            "coo_description",
+            "coo_hs_code",
+            "coo_quantity",
+            "coo_unit",
+            "coo_criteria",
+            "coo_origin_country",
+        ]
+
+        for f in mandatory:
+            if row.get(f) in (None, "", "null"):
+                _add_error(row, f"{f} tidak boleh null (COO tersedia)")
+
+        # CONDITIONAL WAJIB
+        criteria = str(row.get("coo_criteria", "")).strip().upper()
+
+        if criteria == "RVC":
+            if row.get("coo_amount") in (None, "", "null"):
+                _add_error(row, "coo_amount wajib jika criteria = RVC")
+            if row.get("coo_amount_unit") in (None, "", "null"):
+                _add_error(row, "coo_amount_unit wajib jika criteria = RVC")
+
+        if criteria == "PE":
+            if row.get("coo_gw") in (None, "", "null"):
+                _add_error(row, "coo_gw wajib jika criteria = PE")
+            if row.get("coo_gw_unit") in (None, "", "null"):
+                _add_error(row, "coo_gw_unit wajib jika criteria = PE")
+
+        # VALIDASI TERHADAP INVOICE
+        # -------- numeric compare --------
+        coo_qty = _to_float(row.get("coo_quantity"))
+        inv_qty = _to_float(row.get("inv_quantity"))
+
+        if coo_qty is not None and inv_qty is not None:
+            if round(coo_qty, 2) != round(inv_qty, 2):
+                _add_error(
+                    row,
+                    f"coo_quantity ({coo_qty}) tidak sama dengan inv_quantity ({inv_qty})"
+                )
+
+        coo_amount = _to_float(row.get("coo_amount"))
+        inv_amount = _to_float(row.get("inv_amount"))
+
+        if coo_amount is not None and inv_amount is not None:
+            if round(coo_amount, 2) != round(inv_amount, 2):
+                _add_error(
+                    row,
+                    f"coo_amount ({coo_amount}) tidak sama dengan inv_amount ({inv_amount})"
+                )
+
+        coo_gw = _to_float(row.get("coo_gw"))
+        inv_gw = _to_float(row.get("inv_gw"))
+
+        if coo_gw is not None and inv_gw is not None:
+            if round(coo_gw, 2) != round(inv_gw, 2):
+                _add_error(
+                    row,
+                    f"coo_gw ({coo_gw}) tidak sama dengan inv_gw ({inv_gw})"
+                )
+
+        # -------- string compare --------
+        coo_amount_unit = str(row.get("coo_amount_unit") or "").strip()
+        inv_amount_unit = str(row.get("inv_amount_unit") or "").strip()
+
+        if coo_amount_unit and inv_amount_unit:
+            if coo_amount_unit != inv_amount_unit:
+                _add_error(
+                    row,
+                    f"coo_amount_unit ({coo_amount_unit}) tidak sama dengan inv_amount_unit ({inv_amount_unit})"
+                )
+
+        coo_gw_unit = str(row.get("coo_gw_unit") or "").strip()
+        inv_gw_unit = str(row.get("inv_gw_unit") or "").strip()
+
+        if coo_gw_unit and inv_gw_unit:
+            if coo_gw_unit != inv_gw_unit:
+                _add_error(
+                    row,
+                    f"coo_gw_unit ({coo_gw_unit}) tidak sama dengan inv_gw_unit ({inv_gw_unit})"
+                )
+
+    return detail_rows
+
+# ===================================
+# GET PO JSON URI (DIRECT FROM GCS)
+# ===================================
 
 def _get_po_json_uri():
 
@@ -390,9 +777,9 @@ def _map_po_to_details(po_lines, detail_rows):
 
     return detail_rows
 
-# =========================================================
+# ============================
 # VALIDATE PO DATA
-# =========================================================
+# ============================
 
 def _to_num(x):
     if x is None:
@@ -406,8 +793,7 @@ def _validate_po(detail_rows):
     for row in detail_rows:
 
         if not row.get("_po_mapped"):
-            row["match_score"] = "false"
-            row["match_description"] = "PO item tidak ditemukan"
+            _add_error(row, "PO item tidak ditemukan")
             continue
 
         po_data = row.get("_po_data")
@@ -669,6 +1055,19 @@ def run_ocr(invoice_name, uploaded_pdf_paths, with_total_container):
 
     if not all_rows:
         raise Exception("Tidak ada data detail hasil Gemini")
+    
+    # 🔥 FILL INV SEQ DULU (SEBELUM PO MAPPING)
+    all_rows = _fill_inv_seq(all_rows)
+
+    # VALIDATION
+    all_rows = _init_match_fields(all_rows)
+
+    all_rows = _validate_invoice(all_rows)
+    all_rows = _validate_invoice_totals(all_rows)
+    all_rows = _validate_pl(all_rows)
+    all_rows = _validate_pl_totals(all_rows)
+    all_rows = _validate_bl(all_rows)
+    all_rows = _validate_coo(all_rows)
 
    # LOAD RELEVANT PO LINES
     po_numbers = {

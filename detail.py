@@ -167,6 +167,7 @@ DETAIL OUTPUT SCHEMA
   "pl_gw": "number",
   "pl_volume_unit": "string",
   "pl_volume": "number",
+  "pl_amount": "number",
   "pl_total_quantity": "number",
   "pl_total_amount": "number",
   "pl_total_nw": "number",
