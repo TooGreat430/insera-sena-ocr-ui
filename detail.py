@@ -33,9 +33,8 @@ ATURAN UMUM EKSTRAKSI
 
 7. Total line item pada dokumen adalah {total_row}.
 8. Kerjakan HANYA line item dari index {first_index} sampai {last_index}.
-9. Jika dokumen Bill of Lading (BL) atau Certificate of Origin (COO) TIDAK TERSEDIA:
-- Seluruh field bl_* dan coo_* WAJIB diisi dengan string "null".
-- coo_seq TIDAK BOLEH dihitung jika dokumen COO tidak tersedia.
+9. Jika suatu dokumen TIDAK TERSEDIA:
+- Seluruh field dengan prefix dokumen tersebut WAJIB diisi dengan string "null".
 10. Jika pada dokumen terdapat value total seperti total net weight, gross weight, volume, amount, quantity, package yang berbentuk huruf,
     Maka ekstrak nilai numeriknya.
 
@@ -131,7 +130,7 @@ DETAIL OUTPUT SCHEMA
   "inv_incoterms_terms": "string",
   "inv_terms": "string",
   "inv_coo_commodity_origin": "string",
-  "inv_seq": "number",
+  "inv_seq": "null",
   "inv_spart_item_no": "string",
   "inv_description": "string",
   "inv_quantity": "number",
@@ -214,7 +213,7 @@ DETAIL OUTPUT SCHEMA
   "coo_vessel": "string",
   "coo_voyage_no": "string",
   "coo_port_of_discharge": "string",
-  "coo_seq": "number",
+  "coo_seq": "null",
   "coo_mark_number": "string",
   "coo_description": "string",
   "coo_hs_code": "string",
