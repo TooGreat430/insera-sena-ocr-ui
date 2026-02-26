@@ -134,7 +134,6 @@ VALIDASI TOTAL
    - Jika pada dokumen BL bertipe LC:
      - bl_consignee_name diambil dari notify party
      - bl_consignee_address diambil dari notify party
-     - bl_consignee_name diambil dari notify party
 
 2. Field WAJIB (tidak boleh "null"):
    - bl_shipper_name
