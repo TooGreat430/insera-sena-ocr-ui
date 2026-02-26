@@ -95,12 +95,15 @@ GENERAL KNOWLEDGE DETAIL
 9. Jika bl_seller_name atau bl_seller_address tidak ada atau "null":
    - Gunakan bl_shipper_name dan bl_shipper_address.
 10. LC Logic pada Bill of Lading (BL):
-   - Jika bl_consignee_name mengandung nama perusahaan Bank → BL bertipe LC.
-   - Jika tidak → BL bukan bertipe LC.
+    - Jika bl_consignee_name mengandung nama perusahaan Bank → BL bertipe LC.
+    - Jika tidak → BL bukan bertipe LC.
 11. Jika pada dokumen BL bertipe LC:
-     - bl_consignee_name diambil dari notify party
-     - bl_consignee_address diambil dari notify party
-
+    - bl_consignee_name diambil dari notify party
+    - bl_consignee_address diambil dari notify party
+12. coo_seq:
+    - coo_seq adalah nomor urut line item pada dokumen Certificate of Origin (COO).
+    - Jika terdapat nomor urut eksplisit pada dokumen, gunakan nomor tersebut.
+    - Jika tidak terdapat nomor urut, hitung berdasarkan urutan kemunculan line item (dimulai dari 1).
 ============================================
 OUTPUT
 ============================================
@@ -217,7 +220,7 @@ DETAIL OUTPUT SCHEMA
   "coo_vessel": "string",
   "coo_voyage_no": "string",
   "coo_port_of_discharge": "string",
-  "coo_seq": "null",
+  "coo_seq": "number",
   "coo_mark_number": "string",
   "coo_description": "string",
   "coo_hs_code": "string",
